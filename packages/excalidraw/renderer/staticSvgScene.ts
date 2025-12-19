@@ -262,7 +262,10 @@ const renderElementToSvg = (
         div.style.width = "100%";
         div.style.height = "100%";
         const iframe = div.ownerDocument!.createElement("iframe");
-        iframe.src = embedLink?.link ?? "";
+        iframe.src =
+          embedLink?.type === "video" || embedLink?.type === "generic"
+            ? embedLink.link
+            : "";
         iframe.style.width = "100%";
         iframe.style.height = "100%";
         iframe.style.border = "none";

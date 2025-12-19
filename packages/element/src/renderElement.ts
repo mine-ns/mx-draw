@@ -60,6 +60,7 @@ import {
   hasBoundTextElement,
   isMagicFrameElement,
   isImageElement,
+  isLocalVideoEmbeddable,
 } from "./typeChecks";
 import { getContainingFrame } from "./frame";
 import { getCornerRadius } from "./utils";
@@ -419,6 +420,10 @@ const drawElementOnCanvas = (
     case "embeddable":
     case "diamond":
     case "ellipse": {
+      // Skip drawing shape for local video embeddables (video covers entire element)
+      if (isLocalVideoEmbeddable(element)) {
+        break;
+      }
       context.lineJoin = "round";
       context.lineCap = "round";
       rc.draw(ShapeCache.get(element)!);
