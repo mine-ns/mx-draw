@@ -8465,8 +8465,9 @@ class App extends React.Component<AppProps, AppState> {
       : null;
 
     // Default video placeholder size (16:9 aspect ratio)
-    const placeholderWidth = 320 / this.state.zoom.value;
-    const placeholderHeight = 180 / this.state.zoom.value;
+    // Fixed size regardless of zoom - video will appear larger when zoomed in
+    const placeholderWidth = 320;
+    const placeholderHeight = 180;
 
     return newEmbeddableElement({
       type: "embeddable",
