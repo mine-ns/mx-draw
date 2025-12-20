@@ -11338,6 +11338,7 @@ class App extends React.Component<AppProps, AppState> {
         dataURL,
         created: Date.now(),
         lastRetrieved: Date.now(),
+        filename: videoFile.name,
       },
     ]);
 

@@ -134,6 +134,10 @@ export type BinaryFileData = {
    * the file dataURL has changed e.g. as part of restore due to schema update.
    */
   version?: number;
+  /**
+   * Original filename of the uploaded file. Used for downloads.
+   */
+  filename?: string;
 };
 
 export type BinaryFileMetadata = Omit<BinaryFileData, "dataURL">;

@@ -84,6 +84,21 @@ const LocalVideoPopup = ({
   const fileData = files[element.fileId];
   const [descValue, setDescValue] = useState(element.description || "");
   const inputRef = useRef<HTMLInputElement>(null);
+  const descValueRef = useRef(descValue);
+
+  // Keep ref in sync with state for use in cleanup
+  useEffect(() => {
+    descValueRef.current = descValue;
+  }, [descValue]);
+
+  // Auto-save description on unmount (when backdrop is clicked)
+  useLayoutEffect(() => {
+    return () => {
+      if (descValueRef.current !== element.description) {
+        scene.mutateElement(element, { description: descValueRef.current });
+      }
+    };
+  }, [element, scene]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -106,10 +121,14 @@ const LocalVideoPopup = ({
     }
     const blob = new Blob([array], { type: mimeType });
 
+    // Use original filename if available, otherwise generate one
+    const filename =
+      fileData.filename || `video.${mimeType.split("/")[1] || "mp4"}`;
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `video.${mimeType.split("/")[1] || "mp4"}`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
