@@ -1,5 +1,6 @@
 import type {
   IMAGE_MIME_TYPES,
+  VIDEO_MIME_TYPES,
   UserIdleState,
   throttleRAF,
   MIME_TYPES,
@@ -111,6 +112,7 @@ export type DataURL = string & { _brand: "DataURL" };
 export type BinaryFileData = {
   mimeType:
     | ValueOf<typeof IMAGE_MIME_TYPES>
+    | ValueOf<typeof VIDEO_MIME_TYPES>
     // future user or unknown file type
     | typeof MIME_TYPES.binary;
   id: FileId;
@@ -132,6 +134,10 @@ export type BinaryFileData = {
    * the file dataURL has changed e.g. as part of restore due to schema update.
    */
   version?: number;
+  /**
+   * Original filename of the uploaded file. Used for downloads.
+   */
+  filename?: string;
 };
 
 export type BinaryFileMetadata = Omit<BinaryFileData, "dataURL">;
@@ -411,6 +417,8 @@ export interface AppState {
   offsetLeft: number;
 
   fileHandle: FileSystemHandle | null;
+  /** Tracks if the scene has been modified since the last save */
+  isModifiedSinceLastSave: boolean;
   collaborators: Map<SocketId, Collaborator>;
   stats: {
     open: boolean;

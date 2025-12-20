@@ -3218,6 +3218,9 @@ var isImageElement = (element) => {
 var isEmbeddableElement = (element) => {
   return !!element && element.type === "embeddable";
 };
+var isLocalVideoEmbeddable = (element) => {
+  return !!element && element.type === "embeddable" && "fileId" in element && !!element.fileId;
+};
 var isIframeElement = (element) => {
   return !!element && element.type === "iframe";
 };
@@ -11212,6 +11215,9 @@ var drawElementOnCanvas = (element, rc, context, renderConfig) => {
     case "embeddable":
     case "diamond":
     case "ellipse": {
+      if (isLocalVideoEmbeddable(element)) {
+        break;
+      }
       context.lineJoin = "round";
       context.lineCap = "round";
       rc.draw(ShapeCache.get(element));
@@ -16891,7 +16897,11 @@ var _newElementBase = (type, {
 };
 var newElement = (opts) => _newElementBase(opts.type, opts);
 var newEmbeddableElement = (opts) => {
-  return _newElementBase("embeddable", opts);
+  return {
+    ..._newElementBase("embeddable", opts),
+    fileId: opts.fileId ?? null,
+    status: opts.fileId ? opts.status ?? "pending" : void 0
+  };
 };
 var newIframeElement = (opts) => {
   return {
@@ -17951,7 +17961,7 @@ var isNodeInFlowchart = (element, elementsMap) => {
 
 // src/image.ts
 init_define_import_meta_env();
-import { MIME_TYPES as MIME_TYPES2, SVG_NS } from "@excalidraw/common";
+import { IMAGE_MIME_TYPES, MIME_TYPES as MIME_TYPES2, SVG_NS } from "@excalidraw/common";
 var loadHTMLImageElement = (dataURL) => {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -17979,13 +17989,15 @@ var updateImageCache = async ({
         return promises.concat(
           (async () => {
             try {
-              if (fileData.mimeType === MIME_TYPES2.binary) {
+              const isImageMimeType = Object.values(IMAGE_MIME_TYPES).includes(fileData.mimeType);
+              if (!isImageMimeType) {
                 throw new Error("Only images can be added to ImageCache");
               }
               const imagePromise = loadHTMLImageElement(fileData.dataURL);
+              const mimeType = fileData.mimeType;
               const data = {
                 image: imagePromise,
-                mimeType: fileData.mimeType
+                mimeType
               };
               imageCache.set(fileId, data);
               const image = await imagePromise;
@@ -18135,6 +18147,7 @@ import {
   getFontString as getFontString7
 } from "@excalidraw/common";
 var transformElements = (originalElements, transformHandleType, selectedElements, scene, shouldRotateWithDiscreteAngle2, shouldResizeFromCenter, shouldMaintainAspectRatio, pointerX, pointerY, centerX, centerY) => {
+  const maintainAspectRatio = shouldMaintainAspectRatio || selectedElements.some((el) => isLocalVideoEmbeddable(el));
   const elementsMap = scene.getNonDeletedElementsMap();
   if (selectedElements.length === 1) {
     const [element] = selectedElements;
@@ -18161,7 +18174,7 @@ var transformElements = (originalElements, transformHandleType, selectedElements
           pointerX,
           pointerY,
           {
-            shouldMaintainAspectRatio,
+            shouldMaintainAspectRatio: maintainAspectRatio,
             shouldResizeFromCenter
           }
         );
@@ -18174,7 +18187,7 @@ var transformElements = (originalElements, transformHandleType, selectedElements
           scene,
           transformHandleType,
           {
-            shouldMaintainAspectRatio,
+            shouldMaintainAspectRatio: maintainAspectRatio,
             shouldResizeFromCenter
           }
         );
@@ -18206,7 +18219,7 @@ var transformElements = (originalElements, transformHandleType, selectedElements
         pointerX,
         pointerY,
         {
-          shouldMaintainAspectRatio,
+          shouldMaintainAspectRatio: maintainAspectRatio,
           shouldResizeFromCenter
         }
       );
@@ -18218,7 +18231,7 @@ var transformElements = (originalElements, transformHandleType, selectedElements
         originalElements,
         {
           shouldResizeFromCenter,
-          shouldMaintainAspectRatio,
+          shouldMaintainAspectRatio: maintainAspectRatio,
           flipByX,
           flipByY,
           nextWidth,
@@ -18983,7 +18996,7 @@ var resizeMultipleElements = (selectedElements, elementsMap, handleDirection, sc
     };
     const [anchorX, anchorY] = shouldResizeFromCenter ? [midX, midY] : anchorsMap[handleDirection];
     const keepAspectRatio = shouldMaintainAspectRatio || targetElements.some(
-      (item) => item.latest.angle !== 0 || isTextElement(item.latest) || isInGroup(item.latest)
+      (item) => item.latest.angle !== 0 || isTextElement(item.latest) || isInGroup(item.latest) || isLocalVideoEmbeddable(item.latest)
     );
     if (keepAspectRatio) {
       scaleX = scale;
@@ -20185,6 +20198,7 @@ export {
   isLineElement,
   isLinearElement,
   isLinearElementType,
+  isLocalVideoEmbeddable,
   isMagicFrameElement,
   isMeasureTextSupported,
   isNodeInFlowchart,

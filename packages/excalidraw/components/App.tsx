@@ -144,6 +144,7 @@ import {
   isFrameLikeElement,
   isImageElement,
   isEmbeddableElement,
+  isLocalVideoEmbeddable,
   isInitializedImageElement,
   isLinearElement,
   isLinearElementType,
@@ -249,6 +250,8 @@ import {
   isPointInElement,
   maxBindingDistance_simple,
 } from "@excalidraw/element";
+
+import type { VIDEO_MIME_TYPES } from "@excalidraw/common";
 
 import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
 
@@ -366,6 +369,7 @@ import {
   ImageURLToFile,
   isImageFileHandle,
   isSupportedImageFile,
+  isSupportedVideoFileType,
   loadSceneOrLibraryFromBlob,
   normalizeFile,
   parseLibraryJSON,
@@ -404,6 +408,7 @@ import {
   setCursorForShape,
 } from "../cursor";
 import { ElementCanvasButtons } from "../components/ElementCanvasButtons";
+import { VideoPlayer } from "../components/VideoPlayer";
 import { LaserTrails } from "../laser-trails";
 import { withBatchedUpdates, withBatchedUpdatesThrottled } from "../reactUtils";
 import { textWysiwyg } from "../wysiwyg/textWysiwyg";
@@ -1285,6 +1290,10 @@ class App extends React.Component<AppProps, AppState> {
     sceneX: number,
     sceneY: number,
   ) {
+    // Local video embeddables should only activate on double-click, not center click
+    if (el && isLocalVideoEmbeddable(el)) {
+      return false;
+    }
     return (
       el &&
       !event.altKey &&
@@ -1354,7 +1363,8 @@ class App extends React.Component<AppProps, AppState> {
       .filter(
         (el): el is Ordered<NonDeleted<ExcalidrawIframeLikeElement>> =>
           (isEmbeddableElement(el) &&
-            this.embedsValidationStatus.get(el.id) === true) ||
+            (this.embedsValidationStatus.get(el.id) === true ||
+              isLocalVideoEmbeddable(el))) ||
           isIframeElement(el),
       );
 
@@ -1522,7 +1532,20 @@ class App extends React.Component<AppProps, AppState> {
               } as const;
             }
           } else {
-            src = getEmbedLink(toValidURL(el.link || ""));
+            // Check for local video embeddable
+            if (
+              isLocalVideoEmbeddable(el) &&
+              this.files[el.fileId] &&
+              isSupportedVideoFileType(this.files[el.fileId].mimeType)
+            ) {
+              src = {
+                type: "localVideo",
+                dataURL: this.files[el.fileId].dataURL,
+                intrinsicSize: { w: el.width, h: el.height },
+              };
+            } else {
+              src = getEmbedLink(toValidURL(el.link || ""));
+            }
           }
 
           const isActive =
@@ -1532,6 +1555,11 @@ class App extends React.Component<AppProps, AppState> {
             this.state.activeEmbeddable?.element === el &&
             this.state.activeEmbeddable?.state === "hover";
 
+          // Local videos should always stay visible once initialized to avoid
+          // flashing when switching tabs/windows
+          const isLocalVideo = src?.type === "localVideo";
+          const shouldShow = isVisible || isLocalVideo;
+
           return (
             <div
               key={el.id}
@@ -1539,12 +1567,12 @@ class App extends React.Component<AppProps, AppState> {
                 "is-hovered": isHovered,
               })}
               style={{
-                transform: isVisible
+                transform: shouldShow
                   ? `translate(${x - this.state.offsetLeft}px, ${
                       y - this.state.offsetTop
                     }px) scale(${scale})`
                   : "none",
-                display: isVisible ? "block" : "none",
+                display: shouldShow ? "block" : "none",
                 opacity: getRenderOpacity(
                   el,
                   getContainingFrame(el, this.scene.getNonDeletedElementsMap()),
@@ -1579,15 +1607,15 @@ class App extends React.Component<AppProps, AppState> {
                 }}*/
                 className="excalidraw__embeddable-container__inner"
                 style={{
-                  width: isVisible ? `${el.width}px` : 0,
-                  height: isVisible ? `${el.height}px` : 0,
-                  transform: isVisible ? `rotate(${el.angle}rad)` : "none",
+                  width: shouldShow ? `${el.width}px` : 0,
+                  height: shouldShow ? `${el.height}px` : 0,
+                  transform: shouldShow ? `rotate(${el.angle}rad)` : "none",
                   pointerEvents: isActive
                     ? POINTER_EVENTS.enabled
                     : POINTER_EVENTS.disabled,
                 }}
               >
-                {isHovered && (
+                {isHovered && src?.type !== "localVideo" && (
                   <div className="excalidraw__embeddable-hint">
                     {t("buttons.embeddableInteractionButton")}
                   </div>
@@ -1600,29 +1628,36 @@ class App extends React.Component<AppProps, AppState> {
                 >
                   {(isEmbeddableElement(el)
                     ? this.props.renderEmbeddable?.(el, this.state)
-                    : null) ?? (
-                    <iframe
-                      ref={(ref) => this.cacheEmbeddableRef(el, ref)}
-                      className="excalidraw__embeddable"
-                      srcDoc={
-                        src?.type === "document"
-                          ? src.srcdoc(this.state.theme)
-                          : undefined
-                      }
-                      src={
-                        src?.type !== "document" ? src?.link ?? "" : undefined
-                      }
-                      // https://stackoverflow.com/q/18470015
-                      scrolling="no"
-                      referrerPolicy="no-referrer-when-downgrade"
-                      title="Excalidraw Embedded Content"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen={true}
-                      sandbox={`${
-                        src?.sandbox?.allowSameOrigin ? "allow-same-origin" : ""
-                      } allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads`}
-                    />
-                  )}
+                    : null) ??
+                    (src?.type === "localVideo" ? (
+                      <VideoPlayer dataURL={src.dataURL} isActive={isActive} />
+                    ) : (
+                      <iframe
+                        ref={(ref) => this.cacheEmbeddableRef(el, ref)}
+                        className="excalidraw__embeddable"
+                        srcDoc={
+                          src?.type === "document"
+                            ? src.srcdoc(this.state.theme)
+                            : undefined
+                        }
+                        src={
+                          src?.type === "video" || src?.type === "generic"
+                            ? src.link
+                            : undefined
+                        }
+                        // https://stackoverflow.com/q/18470015
+                        scrolling="no"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        title="Excalidraw Embedded Content"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen={true}
+                        sandbox={`${
+                          src?.sandbox?.allowSameOrigin
+                            ? "allow-same-origin"
+                            : ""
+                        } allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads`}
+                      />
+                    ))}
                 </div>
               </div>
             </div>
@@ -1996,6 +2031,7 @@ class App extends React.Component<AppProps, AppState> {
                               updateEmbedValidationStatus={
                                 this.updateEmbedValidationStatus
                               }
+                              files={this.files}
                             />
                           )}
                         {this.props.aiEnabled !== false &&
@@ -2586,6 +2622,13 @@ class App extends React.Component<AppProps, AppState> {
       this.setState((prevAppState) => {
         const actionAppState = actionResult.appState || {};
 
+        // Only allow explicit isModifiedSinceLastSave changes (e.g., save actions resetting to false)
+        // The emitter handles setting it to true when undo stack changes
+        const isModifiedSinceLastSave: boolean =
+          "isModifiedSinceLastSave" in (actionResult.appState || {})
+            ? (actionAppState.isModifiedSinceLastSave ?? prevAppState.isModifiedSinceLastSave)
+            : prevAppState.isModifiedSinceLastSave;
+
         return {
           ...prevAppState,
           ...actionAppState,
@@ -2599,6 +2642,7 @@ class App extends React.Component<AppProps, AppState> {
           theme,
           name,
           errorMessage,
+          isModifiedSinceLastSave,
         };
       });
 
@@ -2888,6 +2932,10 @@ class App extends React.Component<AppProps, AppState> {
 
     this.store.onDurableIncrementEmitter.on((increment) => {
       this.history.record(increment.delta);
+      // Mark as modified whenever something is added to undo stack
+      if (!this.state.isModifiedSinceLastSave) {
+        this.setState({ isModifiedSinceLastSave: true });
+      }
     });
 
     const { onIncrement } = this.props;
@@ -8410,6 +8458,54 @@ class App extends React.Component<AppProps, AppState> {
     });
   };
 
+  private newVideoPlaceholder = ({
+    sceneX,
+    sceneY,
+    addToFrameUnderCursor = true,
+  }: {
+    sceneX: number;
+    sceneY: number;
+    addToFrameUnderCursor?: boolean;
+  }) => {
+    const [gridX, gridY] = getGridPoint(
+      sceneX,
+      sceneY,
+      this.lastPointerDownEvent?.[KEYS.CTRL_OR_CMD]
+        ? null
+        : this.getEffectiveGridSize(),
+    );
+
+    const topLayerFrame = addToFrameUnderCursor
+      ? this.getTopLayerFrameAtSceneCoords({
+          x: gridX,
+          y: gridY,
+        })
+      : null;
+
+    // Default video placeholder size (16:9 aspect ratio)
+    // Fixed size regardless of zoom - video will appear larger when zoomed in
+    const placeholderWidth = 320;
+    const placeholderHeight = 180;
+
+    return newEmbeddableElement({
+      type: "embeddable",
+      strokeColor: "transparent",
+      backgroundColor: "transparent",
+      fillStyle: "solid",
+      strokeWidth: 0,
+      strokeStyle: "solid",
+      roughness: 0,
+      roundness: null,
+      opacity: 100,
+      locked: false,
+      frameId: topLayerFrame ? topLayerFrame.id : null,
+      x: gridX - placeholderWidth / 2,
+      y: gridY - placeholderHeight / 2,
+      width: placeholderWidth,
+      height: placeholderHeight,
+    });
+  };
+
   private handleLinearElementOnPointerDown = (
     event: React.PointerEvent<HTMLElement>,
     elementType: ExcalidrawLinearElement["type"],
@@ -8689,6 +8785,10 @@ class App extends React.Component<AppProps, AppState> {
       | "iframe"
       | "embeddable",
   ) {
+    // Always use sharp edges for embeddable and iframe elements
+    if (elementType === "embeddable" || elementType === "iframe") {
+      return null;
+    }
     return this.state.currentItemRoundness === "round"
       ? {
           type: isUsingAdaptiveRadius(elementType)
@@ -11187,6 +11287,152 @@ class App extends React.Component<AppProps, AppState> {
     });
   };
 
+  private initializeVideo = async (
+    placeholderElement: ExcalidrawEmbeddableElement,
+    videoFile: File,
+  ) => {
+    if (!isSupportedVideoFileType(videoFile.type)) {
+      throw new Error(t("errors.unsupportedFileType"));
+    }
+
+    const mimeType = videoFile.type as ValueOf<typeof VIDEO_MIME_TYPES>;
+    setCursor(this.interactiveCanvas, "wait");
+
+    const fileId = await ((this.props.generateIdForFile?.(
+      videoFile,
+    ) as Promise<FileId>) || generateIdFromFile(videoFile));
+
+    if (!fileId) {
+      console.warn(
+        "Couldn't generate file id or the supplied `generateIdForFile` didn't resolve to one.",
+      );
+      throw new Error(t("errors.imageInsertError"));
+    }
+
+    // Check video file size (300MB limit for videos)
+    const MAX_VIDEO_FILE_BYTES = 300 * 1024 * 1024;
+    if (videoFile.size > MAX_VIDEO_FILE_BYTES) {
+      throw new Error(
+        t("errors.fileTooBig", {
+          maxSize: `${Math.trunc(MAX_VIDEO_FILE_BYTES / 1024 / 1024)}MB`,
+        }),
+      );
+    }
+
+    const dataURL =
+      this.files[fileId]?.dataURL || (await getDataURL(videoFile));
+
+    // Get actual video dimensions
+    const videoDimensions = await new Promise<{
+      width: number;
+      height: number;
+    }>((resolve) => {
+      const video = document.createElement("video");
+      video.onloadedmetadata = () => {
+        resolve({ width: video.videoWidth, height: video.videoHeight });
+      };
+      video.onerror = () => {
+        // Fallback to placeholder dimensions if video metadata fails to load
+        resolve({
+          width: placeholderElement.width,
+          height: placeholderElement.height,
+        });
+      };
+      video.src = dataURL;
+    });
+
+    // Calculate new dimensions maintaining aspect ratio
+    // Use placeholder width as base and adjust height to match video aspect ratio
+    const aspectRatio = videoDimensions.width / videoDimensions.height;
+    const baseWidth = placeholderElement.width;
+    const newWidth = baseWidth;
+    const newHeight = baseWidth / aspectRatio;
+
+    this.addMissingFiles([
+      {
+        mimeType,
+        id: fileId,
+        dataURL,
+        created: Date.now(),
+        lastRetrieved: Date.now(),
+        filename: videoFile.name,
+      },
+    ]);
+
+    // Update the placeholder element with the fileId and correct dimensions
+    const updatedElement = newElementWith(placeholderElement, {
+      fileId,
+      status: "saved",
+      width: newWidth,
+      height: newHeight,
+      // Center the element at the same position
+      y: placeholderElement.y - (newHeight - placeholderElement.height) / 2,
+    });
+
+    resetCursor(this.interactiveCanvas);
+
+    return updatedElement;
+  };
+
+  private insertVideos = async (
+    videoFiles: File[],
+    sceneX: number,
+    sceneY: number,
+  ) => {
+    const gridPadding = 50 / this.state.zoom.value;
+
+    // Create, position, and insert placeholders
+    const placeholders = positionElementsOnGrid(
+      videoFiles.map(() => this.newVideoPlaceholder({ sceneX, sceneY })),
+      sceneX,
+      sceneY,
+      gridPadding,
+    );
+    placeholders.forEach((el) => this.scene.insertElement(el));
+
+    // Initialize videos (replacing placeholders)
+    const initialized = await Promise.all(
+      placeholders.map(async (placeholder, i) => {
+        try {
+          return await this.initializeVideo(placeholder, videoFiles[i]);
+        } catch (error: any) {
+          this.setState({
+            errorMessage: error.message || t("errors.imageInsertError"),
+          });
+          return newElementWith(placeholder, { isDeleted: true });
+        }
+      }),
+    );
+    const initializedMap = arrayToMap(initialized);
+
+    const positioned = positionElementsOnGrid(
+      initialized.filter((el) => !el.isDeleted),
+      sceneX,
+      sceneY,
+      gridPadding,
+    );
+    const positionedMap = arrayToMap(positioned);
+
+    const nextElements = this.scene
+      .getElementsIncludingDeleted()
+      .map((el) => positionedMap.get(el.id) ?? initializedMap.get(el.id) ?? el);
+
+    this.updateScene({
+      appState: {
+        selectedElementIds: makeNextSelectedElementIds(
+          Object.fromEntries(positioned.map((el) => [el.id, true])),
+          this.state,
+        ),
+      },
+      elements: nextElements,
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+
+    this.setState({}, () => {
+      this.actionManager.executeAction(actionFinalize);
+    });
+  };
+
   private handleAppOnDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     const { x: sceneX, y: sceneY } = viewportCoordsToSceneCoords(
       event,
@@ -11236,6 +11482,15 @@ class App extends React.Component<AppProps, AppState> {
 
     if (imageFiles.length > 0 && this.isToolSupported("image")) {
       return this.insertImages(imageFiles, sceneX, sceneY);
+    }
+
+    // Handle video files
+    const videoFiles = fileItems
+      .map((data) => data.file)
+      .filter((file) => isSupportedVideoFileType(file?.type));
+
+    if (videoFiles.length > 0) {
+      return this.insertVideos(videoFiles as File[], sceneX, sceneY);
     }
     const excalidrawLibrary_ids = dataTransferList.getData(
       MIME_TYPES.excalidrawlibIds,

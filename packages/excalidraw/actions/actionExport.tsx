@@ -18,8 +18,8 @@ import { ProjectName } from "../components/ProjectName";
 import { ToolButton } from "../components/ToolButton";
 import { Tooltip } from "../components/Tooltip";
 import { ExportIcon, questionCircle, saveAs } from "../components/icons";
-import { loadFromJSON, saveAsJSON } from "../data";
 import { isImageFileHandle } from "../data/blob";
+import { saveToMxFile, openMxFile } from "../data/mxFormat";
 import { nativeFileSystemSupported } from "../data/filesystem";
 import { resaveAsImageWithScene } from "../data/resave";
 
@@ -49,6 +49,7 @@ export const actionChangeProjectName = register<AppState["name"]>({
       value={app.getName()}
       onChange={(name: string) => updateData(name)}
       ignoreFocus={data?.ignoreFocus ?? false}
+      isModified={appState.isModifiedSinceLastSave}
     />
   ),
 });
@@ -173,13 +174,20 @@ export const actionSaveToActiveFile = register({
             app.files,
             app.getName(),
           )
-        : await saveAsJSON(elements, appState, app.files, app.getName());
+        : await saveToMxFile(
+            elements,
+            appState,
+            app.files,
+            app.getName(),
+            appState.fileHandle,
+          );
 
       return {
         captureUpdate: CaptureUpdateAction.EVENTUALLY,
         appState: {
           ...appState,
           fileHandle,
+          isModifiedSinceLastSave: false,
           toast: fileHandleExists
             ? {
                 message: fileHandle?.name
@@ -213,14 +221,12 @@ export const actionSaveFileToDisk = register({
   trackEvent: { category: "export" },
   perform: async (elements, appState, value, app) => {
     try {
-      const { fileHandle } = await saveAsJSON(
+      const { fileHandle } = await saveToMxFile(
         elements,
-        {
-          ...appState,
-          fileHandle: null,
-        },
+        appState,
         app.files,
         app.getName(),
+        null, // Force "Save As" by passing null fileHandle
       );
       return {
         captureUpdate: CaptureUpdateAction.EVENTUALLY,
@@ -228,6 +234,7 @@ export const actionSaveFileToDisk = register({
           ...appState,
           openDialog: null,
           fileHandle,
+          isModifiedSinceLastSave: false,
           toast: { message: t("toast.fileSaved") },
         },
       };
@@ -271,10 +278,11 @@ export const actionLoadScene = register({
         elements: loadedElements,
         appState: loadedAppState,
         files,
-      } = await loadFromJSON(appState, elements);
+        fileHandle,
+      } = await openMxFile(appState, elements);
       return {
         elements: loadedElements,
-        appState: loadedAppState,
+        appState: { ...loadedAppState, fileHandle, isModifiedSinceLastSave: false },
         files,
         captureUpdate: CaptureUpdateAction.IMMEDIATELY,
       };

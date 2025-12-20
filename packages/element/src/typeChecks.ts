@@ -30,6 +30,7 @@ import type {
   ExcalidrawLineElement,
   ExcalidrawFlowchartNodeElement,
   ExcalidrawLinearElementSubType,
+  FileId,
 } from "./types";
 
 export const isInitializedImageElement = (
@@ -48,6 +49,17 @@ export const isEmbeddableElement = (
   element: ExcalidrawElement | null | undefined,
 ): element is ExcalidrawEmbeddableElement => {
   return !!element && element.type === "embeddable";
+};
+
+export const isLocalVideoEmbeddable = (
+  element: ExcalidrawElement | null | undefined,
+): element is ExcalidrawEmbeddableElement & { fileId: FileId } => {
+  return (
+    !!element &&
+    element.type === "embeddable" &&
+    "fileId" in element &&
+    !!element.fileId
+  );
 };
 
 export const isIframeElement = (

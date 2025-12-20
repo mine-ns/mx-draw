@@ -57,6 +57,7 @@ import {
   isFreeDrawElement,
   isImageElement,
   isLinearElement,
+  isLocalVideoEmbeddable,
   isTextElement,
 } from "./typeChecks";
 
@@ -97,6 +98,11 @@ export const transformElements = (
   centerX: number,
   centerY: number,
 ): boolean => {
+  // Force aspect ratio lock for local video embeddables
+  const maintainAspectRatio =
+    shouldMaintainAspectRatio ||
+    selectedElements.some((el) => isLocalVideoEmbeddable(el));
+
   const elementsMap = scene.getNonDeletedElementsMap();
   if (selectedElements.length === 1) {
     const [element] = selectedElements;
@@ -125,7 +131,7 @@ export const transformElements = (
             pointerX,
             pointerY,
             {
-              shouldMaintainAspectRatio,
+              shouldMaintainAspectRatio: maintainAspectRatio,
               shouldResizeFromCenter,
             },
           );
@@ -139,7 +145,7 @@ export const transformElements = (
           scene,
           transformHandleType,
           {
-            shouldMaintainAspectRatio,
+            shouldMaintainAspectRatio: maintainAspectRatio,
             shouldResizeFromCenter,
           },
         );
@@ -172,7 +178,7 @@ export const transformElements = (
           pointerX,
           pointerY,
           {
-            shouldMaintainAspectRatio,
+            shouldMaintainAspectRatio: maintainAspectRatio,
             shouldResizeFromCenter,
           },
         );
@@ -185,7 +191,7 @@ export const transformElements = (
         originalElements,
         {
           shouldResizeFromCenter,
-          shouldMaintainAspectRatio,
+          shouldMaintainAspectRatio: maintainAspectRatio,
           flipByX,
           flipByY,
           nextWidth,
@@ -1309,7 +1315,8 @@ export const resizeMultipleElements = (
         (item) =>
           item.latest.angle !== 0 ||
           isTextElement(item.latest) ||
-          isInGroup(item.latest),
+          isInGroup(item.latest) ||
+          isLocalVideoEmbeddable(item.latest),
       );
 
     if (keepAspectRatio) {

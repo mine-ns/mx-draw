@@ -100,6 +100,12 @@ export type ExcalidrawEllipseElement = _ExcalidrawElementBase & {
 export type ExcalidrawEmbeddableElement = _ExcalidrawElementBase &
   Readonly<{
     type: "embeddable";
+    /** For local video files - links to BinaryFiles */
+    fileId?: FileId | null;
+    /** Status of file persistence for local videos */
+    status?: "pending" | "saved" | "error";
+    /** Alt text / description for local videos */
+    description?: string;
   }>;
 
 export type MagicGenerationData =
@@ -132,6 +138,7 @@ export type IframeData =
     } & (
       | { type: "video" | "generic"; link: string }
       | { type: "document"; srcdoc: (theme: Theme) => string }
+      | { type: "localVideo"; dataURL: string }
     );
 
 export type ImageCrop = {

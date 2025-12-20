@@ -48,6 +48,7 @@ import type {
   ExcalidrawArrowElement,
   ExcalidrawElbowArrowElement,
   ExcalidrawLineElement,
+  FileId,
 } from "./types";
 
 export type ElementConstructorOpts = MarkOptional<
@@ -165,9 +166,15 @@ export const newElement = (
 export const newEmbeddableElement = (
   opts: {
     type: "embeddable";
+    fileId?: FileId | null;
+    status?: ExcalidrawEmbeddableElement["status"];
   } & ElementConstructorOpts,
 ): NonDeleted<ExcalidrawEmbeddableElement> => {
-  return _newElementBase<ExcalidrawEmbeddableElement>("embeddable", opts);
+  return {
+    ..._newElementBase<ExcalidrawEmbeddableElement>("embeddable", opts),
+    fileId: opts.fileId ?? null,
+    status: opts.fileId ? opts.status ?? "pending" : undefined,
+  };
 };
 
 export const newIframeElement = (
