@@ -370,6 +370,7 @@ let IMAGE_PLACEHOLDER_IMG: HTMLImageElement | null = null;
 const getImagePlaceholderImg = () => {
   if (!IMAGE_PLACEHOLDER_IMG) {
     IMAGE_PLACEHOLDER_IMG =
+    
       typeof document !== "undefined"
         ? document.createElement("img")
         : ({ src: "" } as HTMLImageElement);
