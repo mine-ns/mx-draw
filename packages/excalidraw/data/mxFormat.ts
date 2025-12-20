@@ -1,9 +1,10 @@
 /**
  * MX Whiteboard File Format
  *
- * Replaces default .excalidraw save/import with .mxwj and .mxwz formats.
- * - .mxwj: JSON only (no media)
- * - .mxwz: ZIP archive (with media assets)
+ * Local files: Always .mxwz (ZIP archive containing scene.mxwj + assets/)
+ * Cloud storage: Separate scene.mxwj + /assets/ folder (for mx-dod-form)
+ *
+ * Import supports: .mxwz, .mxwj, .excalidraw (legacy), .json (legacy)
  */
 
 import { DEFAULT_FILENAME } from "@excalidraw/common";
@@ -36,11 +37,10 @@ export const SUPPORTED_IMPORT_EXTENSIONS = [
 ] as const;
 
 /**
- * Save scene to MX format file
+ * Save scene to MX format file (.mxwz)
  *
- * Automatically selects format based on media presence:
- * - No media → .mxwj (JSON only)
- * - Has media → .mxwz (ZIP with assets)
+ * Always saves as ZIP archive for consistency.
+ * ZIP contains: scene.mxwj + assets/{hash}.{ext}
  *
  * @param elements - Scene elements
  * @param appState - Application state
@@ -55,40 +55,17 @@ export const saveToMxFile = async (
   name: string = DEFAULT_FILENAME,
   fileHandle?: FileSystemHandle | null,
 ): Promise<{ fileHandle: FileSystemHandle | null }> => {
-  // Check if scene has any media files referenced by non-deleted elements
-  const hasMedia = Object.keys(files).some((fileId) =>
-    elements.some(
-      (element) =>
-        !element.isDeleted &&
-        "fileId" in element &&
-        element.fileId === fileId,
-    ),
-  );
-
-  if (hasMedia) {
-    // Export as .mxwz (ZIP with assets)
-    const zipBlob = await exportToZip(elements, appState, files);
-    const handle = await fileSave(zipBlob, {
-      name,
-      extension: "mxwz" as any, // Cast needed as mxwz not in original MIME_TYPES
-      description: "MX Whiteboard file (with media)",
-      fileHandle,
-    });
-    return { fileHandle: handle };
-  } else {
-    // Export as .mxwj (JSON only)
-    const { scene } = await exportSceneWithAssets(elements, appState, files);
-    const jsonBlob = new Blob([JSON.stringify(scene, null, 2)], {
-      type: "application/json",
-    });
-    const handle = await fileSave(jsonBlob, {
-      name,
-      extension: "mxwj" as any, // Cast needed as mxwj not in original MIME_TYPES
-      description: "MX Whiteboard file",
-      fileHandle,
-    });
-    return { fileHandle: handle };
-  }
+  // Always save as .mxwz (ZIP) for local files
+  // This avoids confusing format switches when adding/removing media
+  // The ZIP will just be smaller if there's no media
+  const zipBlob = await exportToZip(elements, appState, files);
+  const handle = await fileSave(zipBlob, {
+    name,
+    extension: "mxwz" as any, // Cast needed as mxwz not in original MIME_TYPES
+    description: "MX Whiteboard file",
+    fileHandle,
+  });
+  return { fileHandle: handle };
 };
 
 /**

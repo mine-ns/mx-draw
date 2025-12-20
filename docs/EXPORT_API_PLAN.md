@@ -9,39 +9,24 @@ Replace Excalidraw's default `.excalidraw` format with a new export/import syste
 1. **Separates scene JSON from binary assets** - No embedded base64 data
 2. **Uses content-addressed storage** - SHA-256 hash for asset filenames (deduplication + collision-free)
 3. **Supports two output modes:**
-   - **Local files** - `.mxwj` (JSON only) or `.mxwz` (ZIP with assets)
+   - **Local files** - Always `.mxwz` (ZIP archive) for consistency
    - **Cloud storage** - `scene.mxwj` + `/assets/` folder uploaded separately
 
 ### Use Cases
 
 | Use Case | Format | Where Used |
 |----------|--------|------------|
-| Save to disk (no media) | `.mxwj` | mx-whiteboard (Ctrl+S, Export dialog) |
-| Save to disk (with media) | `.mxwz` | mx-whiteboard (Ctrl+S, Export dialog) |
+| Save to disk | `.mxwz` | mx-whiteboard (Ctrl+S, Export dialog) |
 | Save to cloud | `scene.mxwj` + `/assets/` | mx-dod-form (uses our export API) |
+| Import | `.mxwz`, `.mxwj`, `.excalidraw`, `.json` | mx-whiteboard (Ctrl+O) |
 
 ---
 
 ## File Formats
 
-### `.mxwj` - JSON Only (No Media)
+### `.mxwz` - ZIP Archive (Local Files)
 
-Used when scene contains no images or videos.
-
-```json
-{
-  "type": "excalidraw",
-  "version": 2,
-  "source": "mx-whiteboard",
-  "elements": [...],
-  "appState": {...},
-  "assetReferences": []
-}
-```
-
-### `.mxwz` - ZIP Archive (With Media)
-
-Used when scene contains 1+ images or videos.
+Always used for local file saves. Contains scene JSON + assets.
 
 ```
 whiteboard.mxwz
@@ -52,9 +37,26 @@ whiteboard.mxwz
     └── ...
 ```
 
+### `.mxwj` - JSON Only (Inside ZIP or Cloud)
+
+The scene JSON format used inside `.mxwz` and for cloud storage.
+
+```json
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "mx-whiteboard",
+  "elements": [...],
+  "appState": {...},
+  "assetReferences": [
+    { "id": "...", "hash": "a1b2c3...", "filename": "a1b2c3....png", ... }
+  ]
+}
+```
+
 ### Cloud Storage Structure (R2)
 
-Same structure, uploaded as separate files:
+Same structure as ZIP contents, uploaded as separate files:
 
 ```
 whiteboards/{id}/
@@ -66,13 +68,6 @@ whiteboards/{id}/
 ```
 
 Convex stores just the folder URL: `https://r2.../whiteboards/{id}/`
-
-### Auto-Detection on Save
-
-```typescript
-const hasMedia = Object.keys(files).length > 0;
-// hasMedia ? .mxwz : .mxwj
-```
 
 ---
 
