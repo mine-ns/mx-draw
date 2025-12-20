@@ -1,12 +1,8 @@
 \# Plan: Add HTML5 Video Player for Local Video Embeds
 
-
-
 \## Overview
 
 Extend the existing embeddable element to support local video files (MP4, WebM, OGG) stored as binary data, rendered with a native HTML5 `<video>` element.
-
-
 
 \*\*Decisions:\*\*
 
@@ -16,15 +12,9 @@ Extend the existing embeddable element to support local video files (MP4, WebM, 
 
 \- \*\*Future:\*\* Xilo clip annotations will be a separate element type (not part of this implementation)
 
-
-
 ---
 
-
-
 \## Files to Modify
-
-
 
 \### Phase 1: Type System
 
@@ -38,8 +28,6 @@ Extend the existing embeddable element to support local video files (MP4, WebM, 
 
 | `packages/element/src/types.ts` | Add `fileId` and `status` to `ExcalidrawEmbeddableElement`; add `localVideo` variant to `IframeData` |
 
-
-
 \### Phase 2: Element Helpers
 
 | File | Changes |
@@ -49,8 +37,6 @@ Extend the existing embeddable element to support local video files (MP4, WebM, 
 | `packages/element/src/typeChecks.ts` | Add `isLocalVideoEmbeddable()` type guard |
 
 | `packages/element/src/newElement.ts` | Update `newEmbeddableElement()` to accept `fileId` |
-
-
 
 \### Phase 3: Video Handling
 
@@ -62,8 +48,6 @@ Extend the existing embeddable element to support local video files (MP4, WebM, 
 
 | `packages/element/src/video.ts` | \*\*New file\*\* - Video cache utilities |
 
-
-
 \### Phase 4: Rendering \& Upload
 
 | File | Changes |
@@ -74,21 +58,13 @@ Extend the existing embeddable element to support local video files (MP4, WebM, 
 
 | `packages/excalidraw/components/App.tsx` | Update `renderEmbeddables()` to use VideoPlayer; add `initializeVideo()` method |
 
-
-
 ---
-
-
 
 \## Implementation Steps
 
-
-
-\### Step 1: Add VIDEO\_MIME\_TYPES
+\### Step 1: Add VIDEO_MIME_TYPES
 
 \*\*File:\*\* `packages/common/src/constants.ts`
-
-
 
 Add after `IMAGE\_MIME\_TYPES` (line 237):
 
@@ -106,21 +82,13 @@ export const VIDEO\_MIME\_TYPES = {
 
 ```
 
-
-
 Update `MIME\_TYPES` to include video types.
 
-
-
 ---
-
-
 
 \### Step 2: Extend ExcalidrawEmbeddableElement Type
 
 \*\*File:\*\* `packages/element/src/types.ts`
-
-
 
 Change lines 100-103 from:
 
@@ -135,8 +103,6 @@ export type ExcalidrawEmbeddableElement = \_ExcalidrawElementBase \&
 &nbsp; }>;
 
 ```
-
-
 
 To:
 
@@ -156,17 +122,11 @@ export type ExcalidrawEmbeddableElement = \_ExcalidrawElementBase \&
 
 ```
 
-
-
 ---
-
-
 
 \### Step 3: Add localVideo to IframeData
 
 \*\*File:\*\* `packages/element/src/types.ts`
-
-
 
 Extend the union at lines 127-135:
 
@@ -194,17 +154,11 @@ export type IframeData =
 
 ```
 
-
-
 ---
-
-
 
 \### Step 4: Update BinaryFileData
 
 \*\*File:\*\* `packages/excalidraw/types.ts`
-
-
 
 Update mimeType union to include video types:
 
@@ -220,17 +174,11 @@ mimeType:
 
 ```
 
-
-
 ---
-
-
 
 \### Step 5: Add Type Guards
 
 \*\*File:\*\* `packages/element/src/typeChecks.ts`
-
-
 
 ```typescript
 
@@ -256,17 +204,11 @@ export const isLocalVideoEmbeddable = (
 
 ```
 
-
-
 ---
-
-
 
 \### Step 6: Add Video File Helpers
 
 \*\*File:\*\* `packages/excalidraw/data/blob.ts`
-
-
 
 ```typescript
 
@@ -280,21 +222,13 @@ export const isSupportedVideoFile = (blob: Blob | null | undefined) => {
 
 ```
 
-
-
 ---
-
-
 
 \### Step 7: Create VideoPlayer Component
 
 \*\*File:\*\* `packages/excalidraw/components/VideoPlayer.tsx` (NEW)
 
-
-
 Native HTML5 video with standard browser controls:
-
-
 
 ```typescript
 
@@ -380,8 +314,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
 ```
 
-
-
 \*\*CSS\*\* (add to `packages/excalidraw/css/styles.scss`):
 
 ```scss
@@ -396,27 +328,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
 ```
 
-
-
 ---
-
-
 
 \### Step 8: Update renderEmbeddables in App.tsx
 
 \*\*File:\*\* `packages/excalidraw/components/App.tsx`
 
-
-
 In the `renderEmbeddables()` method (~line 1347):
-
-
 
 1\. Detect local video embeddables by checking `el.fileId` and file MIME type
 
 2\. Render `<VideoPlayer>` instead of `<iframe>` when `src.type === "localVideo"`
-
-
 
 ```typescript
 
@@ -458,17 +380,11 @@ if (isLocalVideoEmbeddable(el) \&\& this.files\[el.fileId]) {
 
 ```
 
-
-
 ---
-
-
 
 \### Step 9: Add Video Upload Flow
 
 \*\*File:\*\* `packages/excalidraw/components/App.tsx`
-
-
 
 Add `initializeVideo()` method (similar to image initialization):
 
@@ -482,21 +398,13 @@ Add `initializeVideo()` method (similar to image initialization):
 
 \- Update element with fileId and status
 
-
-
 Integrate with file drop/paste handlers to detect video files.
 
-
-
 ---
-
-
 
 \### Step 10: Update newEmbeddableElement
 
 \*\*File:\*\* `packages/element/src/newElement.ts`
-
-
 
 Accept optional `fileId` and `status` parameters:
 
@@ -518,15 +426,9 @@ export const newEmbeddableElement = (opts) => {
 
 ```
 
-
-
 ---
 
-
-
 \## Key Design Decisions
-
-
 
 1\. \*\*Extend embeddable\*\* (not new element type) - reuses existing infrastructure
 
@@ -538,15 +440,9 @@ export const newEmbeddableElement = (opts) => {
 
 5\. \*\*Native controls\*\* - uses HTML5 video controls for simplicity
 
-
-
 ---
 
-
-
 \## Video File Size Limit
-
-
 
 Consider adding a max size constant (e.g., 50MB for videos vs 4MB for images):
 
@@ -556,15 +452,9 @@ export const MAX\_ALLOWED\_VIDEO\_FILE\_BYTES = 50 \* 1024 \* 1024; // 50MB
 
 ```
 
-
-
 ---
 
-
-
 \## Video Context Popup (Download + Description)
-
-
 
 For local video embeddables, replace the default "No link is set" popup with a custom popup containing:
 
@@ -572,15 +462,9 @@ For local video embeddables, replace the default "No link is set" popup with a c
 
 2\. \*\*Description/Alt field\*\* - Inline editable text for accessibility/notes
 
-
-
 \### Type Changes
 
-
-
 \*\*File:\*\* `packages/element/src/types.ts`
-
-
 
 Add `description` field to `ExcalidrawEmbeddableElement`:
 
@@ -602,19 +486,11 @@ export type ExcalidrawEmbeddableElement = \_ExcalidrawElementBase \&
 
 ```
 
-
-
 \### UI Changes
-
-
 
 \*\*Modify:\*\* `packages/excalidraw/components/hyperlink/Hyperlink.tsx`
 
-
-
 Add conditional rendering for local video embeddables:
-
-
 
 ```tsx
 
@@ -666,15 +542,9 @@ const isLocalVideo = isLocalVideoEmbeddable(element);
 
 ```
 
-
-
 \### LocalVideoPopup Component
 
-
-
 \*\*New section in:\*\* `packages/excalidraw/components/hyperlink/Hyperlink.tsx`
-
-
 
 ```tsx
 
@@ -836,15 +706,9 @@ const LocalVideoPopup = ({
 
 ```
 
-
-
 \### Localization
 
-
-
 \*\*File:\*\* `packages/excalidraw/locales/en.json`
-
-
 
 Add new strings:
 
@@ -876,11 +740,7 @@ Add new strings:
 
 ```
 
-
-
 \### Files to Modify
-
-
 
 | File | Changes |
 
@@ -894,11 +754,7 @@ Add new strings:
 
 | `packages/excalidraw/components/App.tsx` | Pass `files` prop to Hyperlink component |
 
-
-
 \### Integration in App.tsx
-
-
 
 Ensure `files` is passed to the Hyperlink component:
 
@@ -924,19 +780,11 @@ Ensure `files` is passed to the Hyperlink component:
 
 ```
 
-
-
 ---
-
-
 
 \## Future: Xilo Clip Annotations (Not in this PR)
 
-
-
 When this repo is used as a submodule of `mx-dod-form`, we'll need to support Xilo clip annotations. This should be a \*\*separate element type\*\* (not regular video embeddable):
-
-
 
 ```typescript
 
@@ -964,7 +812,4 @@ export type ExcalidrawXiloClipElement = \_ExcalidrawElementBase \&
 
 ```
 
-
-
 This keeps regular local videos separate from Xilo-specific clip annotations.
-

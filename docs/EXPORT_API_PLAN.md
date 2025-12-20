@@ -15,7 +15,7 @@ Replace Excalidraw's default `.excalidraw` format with a new export/import syste
 ### Use Cases
 
 | Use Case | Format | Where Used |
-|----------|--------|------------|
+| --- | --- | --- |
 | Save to disk | `.mxwz` | mx-whiteboard (Ctrl+S, Export dialog) |
 | Save to cloud | `scene.mxwj` + `/assets/` | mx-dod-form (uses our export API) |
 | Import | `.mxwz`, `.mxwj`, `.excalidraw`, `.json` | mx-whiteboard (Ctrl+O) |
@@ -70,6 +70,7 @@ whiteboards/{id}/
 ```
 
 Convex stores the folder URL AND scene filename:
+
 - `folderUrl`: `https://r2.../whiteboards/{id}/`
 - `sceneFilename`: `scene_a1b2c3d4.mxwj`
 
@@ -86,11 +87,12 @@ Asset filenames are **SHA-256 hash of content** + extension:
 **Why hash-based names:**
 
 | Scenario | Result |
-|----------|--------|
+| --- | --- |
 | 2 different videos, same original name | Different content → different hashes → no collision |
 | 2 identical videos, different names | Same content → same hash → deduplicated |
 
 This ensures:
+
 - **No collisions** - different content always gets unique name
 - **Deduplication** - identical files only stored once
 - **Deterministic** - same content always produces same filename
@@ -105,10 +107,10 @@ This ensures:
 /** Asset reference (replaces embedded dataURL) */
 export interface AssetReference {
   id: FileId;
-  hash: string;              // SHA-256 content hash
+  hash: string; // SHA-256 content hash
   mimeType: string;
-  size: number;              // bytes
-  filename: string;          // hash + extension, e.g., "a1b2c3.png"
+  size: number; // bytes
+  filename: string; // hash + extension, e.g., "a1b2c3.png"
 }
 
 /** Exported scene with external asset references */
@@ -253,8 +255,8 @@ export const MX_FILE_EXTENSIONS = {
 export const SUPPORTED_IMPORT_EXTENSIONS = [
   "mxwj",
   "mxwz",
-  "excalidraw",  // Legacy support
-  "json",        // Legacy support
+  "excalidraw", // Legacy support
+  "json", // Legacy support
 ];
 ```
 
@@ -305,12 +307,12 @@ export const loadFromMxFile = async (file: File): Promise<ImportResult> => {
 
 ### Backward Compatibility
 
-| Format | Import | Export |
-|--------|--------|--------|
-| `.mxwj` | ✅ | ✅ |
-| `.mxwz` | ✅ | ✅ |
-| `.excalidraw` | ✅ (legacy) | ❌ |
-| `.json` | ✅ (legacy) | ❌ |
+| Format        | Import      | Export |
+| ------------- | ----------- | ------ |
+| `.mxwj`       | ✅          | ✅     |
+| `.mxwz`       | ✅          | ✅     |
+| `.excalidraw` | ✅ (legacy) | ❌     |
+| `.json`       | ✅ (legacy) | ❌     |
 
 ---
 
@@ -336,30 +338,45 @@ blobToDataURL(blob) → Promise<string>
 
 ```typescript
 // EXPORT: Save to R2
-const { scene, assets, sceneFilename } = await exportSceneWithAssets(elements, appState, files);
+const { scene, assets, sceneFilename } = await exportSceneWithAssets(
+  elements,
+  appState,
+  files,
+);
 
 // Upload scene with unique filename
-await uploadToR2(`whiteboards/${id}/${sceneFilename}`, new Blob([JSON.stringify(scene)]));
+await uploadToR2(
+  `whiteboards/${id}/${sceneFilename}`,
+  new Blob([JSON.stringify(scene)]),
+);
 
 // Upload each asset
 for (const asset of assets) {
-  await uploadToR2(`whiteboards/${id}/assets/${asset.reference.filename}`, asset.blob);
+  await uploadToR2(
+    `whiteboards/${id}/assets/${asset.reference.filename}`,
+    asset.blob,
+  );
 }
 
 // Store folder URL AND scene filename in Convex
-await saveToConvex({ id, url: `https://r2.../whiteboards/${id}/`, sceneFilename });
-
+await saveToConvex({
+  id,
+  url: `https://r2.../whiteboards/${id}/`,
+  sceneFilename,
+});
 
 // IMPORT: Load from R2
 const { folderUrl, sceneFilename } = await getFromConvex(id);
-const sceneJson = await fetch(`${folderUrl}/${sceneFilename}`).then(r => r.json());
+const sceneJson = await fetch(`${folderUrl}/${sceneFilename}`).then((r) =>
+  r.json(),
+);
 
 const { elements, appState, files } = await importSceneWithAssets(
   sceneJson,
   async (filename) => {
     const response = await fetch(`${folderUrl}/assets/${filename}`);
     return response.blob();
-  }
+  },
 );
 ```
 
@@ -405,7 +422,7 @@ export type {
 ## Files to Create/Modify
 
 | File | Action |
-|------|--------|
+| --- | --- |
 | `packages/excalidraw/data/types.ts` | Add export/import types |
 | `packages/excalidraw/data/exportAssets.ts` | **NEW** - Core export/import functions |
 | `packages/excalidraw/data/mxFormat.ts` | **NEW** - MX file save/load functions |
@@ -457,6 +474,7 @@ const blob = new Blob([rawBlob], { type: ref.mimeType });
 ### VideoPlayer Component
 
 The VideoPlayer component includes:
+
 - **Loading spinner** - Shows while video is loading
 - **Error states** - Displays error message if video fails to load
 - **Valid source check** - Shows "Video not found" if dataURL is empty
@@ -466,6 +484,7 @@ The VideoPlayer component includes:
 ## Implementation Checklist
 
 ### Phase 1: Core API
+
 - [x] Create `packages/excalidraw/data/hash.ts` - SHA-256 utility
 - [x] Create `packages/excalidraw/data/exportAssets.ts` - Core export/import
 - [x] Add jszip dependency
@@ -473,6 +492,7 @@ The VideoPlayer component includes:
 - [x] Add blob utilities to `packages/common/src/utils.ts`
 
 ### Phase 2: MX File Format
+
 - [x] Create `packages/excalidraw/data/mxFormat.ts` - Save/load functions
 - [x] Update `actionSaveFileToDisk` to use `saveToMxFile`
 - [x] Update `actionLoadScene` to use `loadFromMxFile`/`openMxFile`
@@ -480,13 +500,16 @@ The VideoPlayer component includes:
 - [x] Ctrl+S keyboard shortcut now uses MX format
 
 ### Phase 3: UI Updates
+
 - [x] File descriptions set in `mxFormat.ts` ("MX Whiteboard file", "MX Whiteboard file (with media)")
 - [x] Generic locale labels work with new format (no changes needed)
 
 ### Phase 4: Public API
+
 - [x] Export all new APIs from `packages/excalidraw/index.tsx`
 
 ### Phase 5: Testing
+
 - [x] Test: Save scene without media → `.mxwj`
 - [x] Test: Save scene with image → `.mxwz`
 - [x] Test: Save scene with video → `.mxwz`
@@ -496,6 +519,7 @@ The VideoPlayer component includes:
 - [x] Test: Import legacy `.json` file
 
 ### Additional Fixes (During Testing)
+
 - [x] Fix: Video flashing "empty web embed" when switching tabs
 - [x] Fix: Unique scene filenames (`scene_{hash}.mxwj`) for cloud storage
 - [x] Fix: JSZip MIME type for video import
