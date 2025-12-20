@@ -60,7 +60,7 @@
     "build:version": "yarn --cwd ./excalidraw-app build:version",
     "build": "yarn --cwd ./excalidraw-app build",
     "build:preview": "yarn --cwd ./excalidraw-app build:preview",
-    "start": "yarn build:packages && yarn --cwd ./excalidraw-app start",
+    "start": "yarn build:packages && rimraf packages/common/dist/types packages/element/dist/types packages/excalidraw/dist/types packages/math/dist/types && yarn --cwd ./excalidraw-app start",
     "start:production": "yarn --cwd ./excalidraw-app start:production",
     "start:example": "yarn build:packages && yarn --cwd ./examples/with-script-in-browser start",
     "test:all": "yarn test:typecheck && yarn test:code && yarn test:other && yarn test:app --watch=false",
