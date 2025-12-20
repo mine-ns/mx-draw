@@ -1555,6 +1555,11 @@ class App extends React.Component<AppProps, AppState> {
             this.state.activeEmbeddable?.element === el &&
             this.state.activeEmbeddable?.state === "hover";
 
+          // Local videos should always stay visible once initialized to avoid
+          // flashing when switching tabs/windows
+          const isLocalVideo = src?.type === "localVideo";
+          const shouldShow = isVisible || isLocalVideo;
+
           return (
             <div
               key={el.id}
@@ -1562,12 +1567,12 @@ class App extends React.Component<AppProps, AppState> {
                 "is-hovered": isHovered,
               })}
               style={{
-                transform: isVisible
+                transform: shouldShow
                   ? `translate(${x - this.state.offsetLeft}px, ${
                       y - this.state.offsetTop
                     }px) scale(${scale})`
                   : "none",
-                display: isVisible ? "block" : "none",
+                display: shouldShow ? "block" : "none",
                 opacity: getRenderOpacity(
                   el,
                   getContainingFrame(el, this.scene.getNonDeletedElementsMap()),
@@ -1602,9 +1607,9 @@ class App extends React.Component<AppProps, AppState> {
                 }}*/
                 className="excalidraw__embeddable-container__inner"
                 style={{
-                  width: isVisible ? `${el.width}px` : 0,
-                  height: isVisible ? `${el.height}px` : 0,
-                  transform: isVisible ? `rotate(${el.angle}rad)` : "none",
+                  width: shouldShow ? `${el.width}px` : 0,
+                  height: shouldShow ? `${el.height}px` : 0,
+                  transform: shouldShow ? `rotate(${el.angle}rad)` : "none",
                   pointerEvents: isActive
                     ? POINTER_EVENTS.enabled
                     : POINTER_EVENTS.disabled,

@@ -212,9 +212,9 @@ export const importSceneWithAssets = async (
   const files: BinaryFiles = {};
 
   // Fetch all assets and convert to dataURLs
-  for (const ref of scene.assetReferences) {
+  for (const ref of scene.assetReferences || []) {
     const blob = await assetFetcher(ref.filename);
-    const dataURL = await blobToDataURL(blob) as DataURL;
+    const dataURL = (await blobToDataURL(blob)) as DataURL;
 
     const fileData: BinaryFileData = {
       id: ref.id,
