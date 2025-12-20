@@ -25,7 +25,7 @@ export const getDefaultAppState = (): Omit<
 > => {
   return {
     showWelcomeScreen: false,
-    theme: THEME.DARK,
+    theme: THEME.LIGHT,
     collaborators: new Map(),
     currentChartType: "bar",
     currentItemBackgroundColor: DEFAULT_ELEMENT_PROPS.backgroundColor,
@@ -107,7 +107,7 @@ export const getDefaultAppState = (): Omit<
     editingFrame: null,
     elementsToHighlight: null,
     toast: null,
-    viewBackgroundColor: COLOR_PALETTE.black,
+    viewBackgroundColor: COLOR_PALETTE.white,
     zenModeEnabled: false,
     zoom: {
       value: 1 as NormalizedZoomValue,
