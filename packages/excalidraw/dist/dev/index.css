@@ -7103,6 +7103,9 @@ body.excalidraw-cursor-resize * {
   letter-spacing: 0.6px;
   font-family: "Assistant";
 }
+.excalidraw__embeddable-container .excalidraw__embeddable__video {
+  border-radius: var(--embeddable-radius);
+}
 
 /* fonts/fonts.css */
 @font-face {

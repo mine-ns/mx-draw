@@ -797,7 +797,7 @@ var FRAME_STYLE = {
 };
 var MIN_FONT_SIZE = 1;
 var DEFAULT_FONT_SIZE = 20;
-var DEFAULT_FONT_FAMILY = FONT_FAMILY.Excalifont;
+var DEFAULT_FONT_FAMILY = FONT_FAMILY["Lilita One"];
 var DEFAULT_TEXT_ALIGN = "left";
 var DEFAULT_VERTICAL_ALIGN = "top";
 var DEFAULT_VERSION = "{version}";
@@ -822,6 +822,12 @@ var IMAGE_MIME_TYPES = {
   avif: "image/avif",
   jfif: "image/jfif"
 };
+var VIDEO_MIME_TYPES = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  ogg: "video/ogg",
+  mov: "video/quicktime"
+};
 var STRING_MIME_TYPES = {
   text: "text/plain",
   html: "text/html",
@@ -841,12 +847,15 @@ var MIME_TYPES = {
   // binary
   binary: "application/octet-stream",
   // image
-  ...IMAGE_MIME_TYPES
+  ...IMAGE_MIME_TYPES,
+  // video
+  ...VIDEO_MIME_TYPES
 };
 var ALLOWED_PASTE_MIME_TYPES = [
   MIME_TYPES.text,
   MIME_TYPES.html,
-  ...Object.values(IMAGE_MIME_TYPES)
+  ...Object.values(IMAGE_MIME_TYPES),
+  ...Object.values(VIDEO_MIME_TYPES)
 ];
 var EXPORT_IMAGE_TYPES = {
   png: "png",
@@ -2224,6 +2233,25 @@ var setFeatureFlag = (flag, value) => {
     console.error("unable to set feature flag", e);
   }
 };
+var dataURLToBlob = (dataURL) => {
+  const [header, base64Data] = dataURL.split(",");
+  const mimeMatch = header.match(/data:([^;]+)/);
+  const mimeType = mimeMatch?.[1] || "application/octet-stream";
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+};
+var blobToDataURL = (blob) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
 
 // src/random.ts
 var random = new Random(Date.now());
@@ -2530,6 +2558,7 @@ export {
   VERSIONS,
   VERSION_TIMEOUT,
   VERTICAL_ALIGN,
+  VIDEO_MIME_TYPES,
   WINDOWS_EMOJI_FALLBACK_FONT,
   YOUTUBE_STATES,
   ZOOM_STEP,
@@ -2540,6 +2569,7 @@ export {
   arrayToMapWithIndex,
   arrayToObject,
   assertNever,
+  blobToDataURL,
   bytesToHexString,
   capitalizeString,
   castArray,
@@ -2547,6 +2577,7 @@ export {
   cloneJSON,
   composeEventHandlers,
   createUserAgentDescriptor,
+  dataURLToBlob,
   debounce,
   debugClear,
   debugCloseFrame,

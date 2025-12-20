@@ -11,6 +11,7 @@ import {
   canHaveArrowheads,
   canvasToBlob,
   centerScrollOn,
+  cleanAppStateForExport,
   createFile,
   dataURLToString,
   encodePngMetadata,
@@ -46,8 +47,8 @@ import {
   isSomeElementSelected,
   isSupportedImageFile,
   isSupportedImageFileType,
+  isSupportedVideoFileType,
   loadFromBlob,
-  loadFromJSON,
   loadLibraryFromBlob,
   loadSceneOrLibraryFromBlob,
   nativeFileSystemSupported,
@@ -61,18 +62,17 @@ import {
   restoreElement,
   restoreElements,
   restoreLibraryItems,
-  saveAsJSON,
   saveLibraryAsJSON,
   serializeAsJSON,
   serializeLibraryAsJSON,
   strokeRectWithRotation_simple
-} from "./chunk-I7VNWNSU.js";
+} from "./chunk-TADE2NW4.js";
 import {
   define_import_meta_env_default
 } from "./chunk-CP5DND7P.js";
 import {
   en_default
-} from "./chunk-OCFTI2BU.js";
+} from "./chunk-6X73Y4GP.js";
 import {
   percentages_default
 } from "./chunk-WCM2OLWY.js";
@@ -83,13 +83,13 @@ import {
 } from "./chunk-XDFCUUT6.js";
 
 // index.tsx
-import React47, { useEffect as useEffect48 } from "react";
+import React48, { useEffect as useEffect48 } from "react";
 import { DEFAULT_UI_OPTIONS, isShallowEqual as isShallowEqual10 } from "@excalidraw/common";
 
 // components/App.tsx
 import clsx61 from "clsx";
 import throttle3 from "lodash.throttle";
-import React45, { useContext as useContext3 } from "react";
+import React46, { useContext as useContext3 } from "react";
 import { flushSync as flushSync3 } from "react-dom";
 import rough3 from "roughjs/bin/rough";
 import { nanoid } from "nanoid";
@@ -227,6 +227,7 @@ import {
   isFrameLikeElement as isFrameLikeElement15,
   isImageElement as isImageElement9,
   isEmbeddableElement as isEmbeddableElement4,
+  isLocalVideoEmbeddable as isLocalVideoEmbeddable3,
   isInitializedImageElement as isInitializedImageElement3,
   isLinearElement as isLinearElement12,
   isLinearElementType as isLinearElementType2,
@@ -381,7 +382,7 @@ var globImport_locales_json = __glob({
   "./locales/de-CH.json": () => import("./locales/de-CH-OAWPDQFJ.js"),
   "./locales/de-DE.json": () => import("./locales/de-DE-HE4SJIAA.js"),
   "./locales/el-GR.json": () => import("./locales/el-GR-QXASZLPE.js"),
-  "./locales/en.json": () => import("./locales/en-MLZIHOCR.js"),
+  "./locales/en.json": () => import("./locales/en-F2IW33YW.js"),
   "./locales/es-ES.json": () => import("./locales/es-ES-EDA76ZAF.js"),
   "./locales/eu-ES.json": () => import("./locales/eu-ES-TF2DGTZU.js"),
   "./locales/fa-IR.json": () => import("./locales/fa-IR-ITKFQ7QV.js"),
@@ -8699,10 +8700,218 @@ var ProjectName = (props) => {
   ] });
 };
 
+// data/mxFormat.ts
+import { DEFAULT_FILENAME } from "@excalidraw/common";
+
+// data/exportAssets.ts
+import JSZip from "jszip";
+import {
+  EXPORT_DATA_TYPES,
+  getExportSource,
+  VERSIONS,
+  dataURLToBlob,
+  blobToDataURL
+} from "@excalidraw/common";
+
+// data/hash.ts
+var sha256 = async (blob) => {
+  const buffer = await blob.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+var getExtensionFromMimeType = (mimeType) => {
+  const mimeToExt = {
+    // Images
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+    "image/bmp": "bmp",
+    "image/avif": "avif",
+    "image/jfif": "jfif",
+    // Videos
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/ogg": "ogv",
+    "video/quicktime": "mov",
+    "video/x-msvideo": "avi",
+    "video/x-matroska": "mkv"
+  };
+  return mimeToExt[mimeType] || mimeType.split("/")[1] || "bin";
+};
+
+// data/exportAssets.ts
+var isFileReferenced = (elements, fileId) => {
+  return elements.some(
+    (element) => !element.isDeleted && "fileId" in element && element.fileId === fileId
+  );
+};
+var generateSceneHash = async (scene) => {
+  const content = JSON.stringify(scene);
+  const blob = new Blob([content], { type: "application/json" });
+  const fullHash = await sha256(blob);
+  return fullHash.slice(0, 8);
+};
+var exportSceneWithAssets = async (elements, appState, files) => {
+  const assets = [];
+  const assetReferences = [];
+  for (const [fileId, fileData] of Object.entries(files)) {
+    if (!isFileReferenced(elements, fileId)) {
+      continue;
+    }
+    const blob = dataURLToBlob(fileData.dataURL);
+    const hash = await sha256(blob);
+    const ext = getExtensionFromMimeType(fileData.mimeType);
+    const reference = {
+      id: fileId,
+      hash,
+      mimeType: fileData.mimeType,
+      size: blob.size,
+      filename: `${hash}.${ext}`
+    };
+    assetReferences.push(reference);
+    assets.push({ reference, blob });
+  }
+  const scene = {
+    type: EXPORT_DATA_TYPES.excalidraw,
+    version: VERSIONS.excalidraw,
+    source: getExportSource(),
+    elements,
+    appState: cleanAppStateForExport(appState),
+    assetReferences
+  };
+  const sceneHash = await generateSceneHash(scene);
+  const sceneFilename = `scene_${sceneHash}.mxwj`;
+  return { scene, assets, sceneFilename };
+};
+var exportToZip = async (elements, appState, files) => {
+  const { scene, assets, sceneFilename } = await exportSceneWithAssets(
+    elements,
+    appState,
+    files
+  );
+  const zip = new JSZip();
+  zip.file(sceneFilename, JSON.stringify(scene, null, 2));
+  const assetsFolder = zip.folder("assets");
+  if (assetsFolder) {
+    for (const asset of assets) {
+      assetsFolder.file(asset.reference.filename, asset.blob);
+    }
+  }
+  return zip.generateAsync({ type: "blob" });
+};
+var importFromZip = async (zipBlob) => {
+  const zip = await JSZip.loadAsync(zipBlob);
+  const sceneFileRegex = /^scene(_[a-f0-9]+)?\.mxwj$/;
+  let sceneFile = null;
+  zip.forEach((relativePath, file2) => {
+    if (sceneFileRegex.test(relativePath)) {
+      sceneFile = file2;
+    }
+  });
+  if (!sceneFile) {
+    throw new Error("Invalid .mxwz file: missing scene*.mxwj");
+  }
+  const sceneJson = await sceneFile.async("string");
+  const scene = JSON.parse(sceneJson);
+  const assetFetcher = async (filename) => {
+    const assetFile = zip.file(`assets/${filename}`);
+    if (!assetFile) {
+      throw new Error(`Asset not found in ZIP: ${filename}`);
+    }
+    return assetFile.async("blob");
+  };
+  return importSceneWithAssets(scene, assetFetcher);
+};
+var importFromMxJson = async (file2) => {
+  const text = await file2.text();
+  const scene = JSON.parse(text);
+  return {
+    elements: scene.elements,
+    appState: scene.appState,
+    files: {}
+  };
+};
+var importSceneWithAssets = async (scene, assetFetcher) => {
+  const files = {};
+  for (const ref of scene.assetReferences || []) {
+    const rawBlob = await assetFetcher(ref.filename);
+    const blob = new Blob([rawBlob], { type: ref.mimeType });
+    const dataURL = await blobToDataURL(blob);
+    const fileData = {
+      id: ref.id,
+      mimeType: ref.mimeType,
+      dataURL,
+      created: Date.now()
+    };
+    files[ref.id] = fileData;
+  }
+  return {
+    elements: scene.elements,
+    appState: scene.appState,
+    files
+  };
+};
+
+// data/mxFormat.ts
+var MX_FILE_EXTENSIONS = {
+  json: "mxwj",
+  zip: "mxwz"
+};
+var SUPPORTED_IMPORT_EXTENSIONS = [
+  "mxwj",
+  "mxwz",
+  "excalidraw",
+  // Legacy support
+  "json"
+  // Legacy support
+];
+var saveToMxFile = async (elements, appState, files, name = DEFAULT_FILENAME, fileHandle) => {
+  const zipBlob = await exportToZip(elements, appState, files);
+  const handle = await fileSave(zipBlob, {
+    name,
+    extension: "mxwz",
+    // Cast needed as mxwz not in original MIME_TYPES
+    description: "MX Whiteboard file",
+    fileHandle
+  });
+  return { fileHandle: handle };
+};
+var loadFromMxFile = async (file2, localAppState = null, localElements = null) => {
+  const ext = file2.name.split(".").pop()?.toLowerCase();
+  if (ext === "mxwz") {
+    return importFromZip(file2);
+  } else if (ext === "mxwj") {
+    return importFromMxJson(file2);
+  } else if (ext === "excalidraw" || ext === "json") {
+    const result = await loadFromBlob(file2, localAppState, localElements);
+    return {
+      elements: result.elements,
+      appState: result.appState,
+      files: result.files || {}
+    };
+  }
+  throw new Error(`Unsupported file type: .${ext}`);
+};
+var openMxFile = async (localAppState = null, localElements = null) => {
+  const file2 = await fileOpen({
+    description: "MX Whiteboard files"
+    // Note: fileOpen uses keys from MIME_TYPES, so we can't use custom extensions directly
+    // The file picker will show all files, and we filter by extension after selection
+  });
+  const result = await loadFromMxFile(file2, localAppState, localElements);
+  return {
+    ...result,
+    fileHandle: file2.handle || null
+  };
+};
+
 // data/index.ts
 import {
   DEFAULT_EXPORT_PADDING,
-  DEFAULT_FILENAME,
+  DEFAULT_FILENAME as DEFAULT_FILENAME2,
   IMAGE_MIME_TYPES,
   isFirefox,
   MIME_TYPES as MIME_TYPES3,
@@ -8716,7 +8925,7 @@ import { getElementsOverlappingFrame } from "@excalidraw/element";
 // clipboard.ts
 import {
   ALLOWED_PASTE_MIME_TYPES,
-  EXPORT_DATA_TYPES,
+  EXPORT_DATA_TYPES as EXPORT_DATA_TYPES2,
   MIME_TYPES as MIME_TYPES2,
   arrayToMap as arrayToMap5,
   isMemberOf,
@@ -9085,9 +9294,9 @@ var probablySupportsClipboardWriteText = "clipboard" in navigator && "writeText"
 var probablySupportsClipboardBlob = "clipboard" in navigator && "write" in navigator.clipboard && "ClipboardItem" in window && "toBlob" in HTMLCanvasElement.prototype;
 var clipboardContainsElements = (contents) => {
   if ([
-    EXPORT_DATA_TYPES.excalidraw,
-    EXPORT_DATA_TYPES.excalidrawClipboard,
-    EXPORT_DATA_TYPES.excalidrawClipboardWithAPI
+    EXPORT_DATA_TYPES2.excalidraw,
+    EXPORT_DATA_TYPES2.excalidrawClipboard,
+    EXPORT_DATA_TYPES2.excalidrawClipboardWithAPI
   ].includes(contents?.type) && Array.isArray(contents.elements)) {
     return true;
   }
@@ -9163,7 +9372,7 @@ var serializeAsClipboardJSON = ({
     );
   }
   const contents = {
-    type: EXPORT_DATA_TYPES.excalidrawClipboard,
+    type: EXPORT_DATA_TYPES2.excalidrawClipboard,
     elements: elements.map((element) => {
       if (getContainingFrame(element, elementsMap) && !framesToCopy.has(getContainingFrame(element, elementsMap))) {
         const copiedElement = deepCopyElement(element);
@@ -9386,7 +9595,7 @@ var parseClipboard = async (dataList, isPlainPaste = false) => {
   }
   try {
     const systemClipboardData = JSON.parse(parsedEventData.value);
-    const programmaticAPI = systemClipboardData.type === EXPORT_DATA_TYPES.excalidrawClipboardWithAPI;
+    const programmaticAPI = systemClipboardData.type === EXPORT_DATA_TYPES2.excalidrawClipboardWithAPI;
     if (clipboardContainsElements(systemClipboardData)) {
       return {
         elements: systemClipboardData.elements,
@@ -9510,7 +9719,7 @@ var exportCanvas = async (type, elements, appState, files, {
   exportBackground,
   exportPadding = DEFAULT_EXPORT_PADDING,
   viewBackgroundColor,
-  name = appState.name || DEFAULT_FILENAME,
+  name = appState.name || DEFAULT_FILENAME2,
   fileHandle = null,
   exportingFrame = null
 }) => {
@@ -9566,7 +9775,7 @@ var exportCanvas = async (type, elements, appState, files, {
     let blob = canvasToBlob(tempCanvas);
     if (appState.exportEmbedScene) {
       blob = blob.then(
-        (blob2) => import("./data/image-SW5II2KL.js").then(
+        (blob2) => import("./data/image-RYJ7L54A.js").then(
           ({ encodePngMetadata: encodePngMetadata2 }) => encodePngMetadata2({
             blob: blob2,
             metadata: serializeAsJSON(elements, appState, files, "local")
@@ -9755,7 +9964,13 @@ var actionSaveToActiveFile = register({
         appState,
         app.files,
         app.getName()
-      ) : await saveAsJSON(elements, appState, app.files, app.getName());
+      ) : await saveToMxFile(
+        elements,
+        appState,
+        app.files,
+        app.getName(),
+        appState.fileHandle
+      );
       return {
         captureUpdate: CaptureUpdateAction9.EVENTUALLY,
         appState: {
@@ -9788,14 +10003,13 @@ var actionSaveFileToDisk = register({
   trackEvent: { category: "export" },
   perform: async (elements, appState, value, app) => {
     try {
-      const { fileHandle } = await saveAsJSON(
+      const { fileHandle } = await saveToMxFile(
         elements,
-        {
-          ...appState,
-          fileHandle: null
-        },
+        appState,
         app.files,
-        app.getName()
+        app.getName(),
+        null
+        // Force "Save As" by passing null fileHandle
       );
       return {
         captureUpdate: CaptureUpdateAction9.EVENTUALLY,
@@ -9842,11 +10056,12 @@ var actionLoadScene = register({
       const {
         elements: loadedElements,
         appState: loadedAppState,
-        files
-      } = await loadFromJSON(appState, elements);
+        files,
+        fileHandle
+      } = await openMxFile(appState, elements);
       return {
         elements: loadedElements,
-        appState: loadedAppState,
+        appState: { ...loadedAppState, fileHandle },
         files,
         captureUpdate: CaptureUpdateAction9.IMMEDIATELY
       };
@@ -11813,8 +12028,11 @@ import {
   isLocalLink,
   normalizeLink
 } from "@excalidraw/common";
-import { isEmbeddableElement } from "@excalidraw/element";
-import { jsx as jsx47, jsxs as jsxs26 } from "react/jsx-runtime";
+import {
+  isEmbeddableElement,
+  isLocalVideoEmbeddable
+} from "@excalidraw/element";
+import { Fragment as Fragment8, jsx as jsx47, jsxs as jsxs26 } from "react/jsx-runtime";
 var POPUP_WIDTH = 380;
 var POPUP_HEIGHT = 42;
 var POPUP_PADDING = 5;
@@ -11822,13 +12040,106 @@ var SPACE_BOTTOM = 85;
 var AUTO_HIDE_TIMEOUT = 500;
 var IS_HYPERLINK_TOOLTIP_VISIBLE = false;
 var embeddableLinkCache = /* @__PURE__ */ new Map();
+var LocalVideoPopup = ({
+  element,
+  files,
+  scene,
+  isEditing,
+  setAppState
+}) => {
+  const fileData = files[element.fileId];
+  const [descValue, setDescValue] = useState10(element.description || "");
+  const inputRef = useRef12(null);
+  const descValueRef = useRef12(descValue);
+  useEffect16(() => {
+    descValueRef.current = descValue;
+  }, [descValue]);
+  useLayoutEffect2(() => {
+    return () => {
+      if (descValueRef.current !== element.description) {
+        scene.mutateElement(element, { description: descValueRef.current });
+      }
+    };
+  }, [element, scene]);
+  useEffect16(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+  const handleDownload = () => {
+    if (!fileData) {
+      return;
+    }
+    const [header, base64] = fileData.dataURL.split(",");
+    const mimeType = header.match(/:(.*?);/)?.[1] || "video/mp4";
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([array], { type: mimeType });
+    const filename = fileData.filename || `video.${mimeType.split("/")[1] || "mp4"}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const handleDescriptionSubmit = () => {
+    scene.mutateElement(element, { description: descValue });
+    setAppState({ showHyperlinkPopup: "info" });
+  };
+  return /* @__PURE__ */ jsxs26(Fragment8, { children: [
+    isEditing ? /* @__PURE__ */ jsx47(
+      "input",
+      {
+        ref: inputRef,
+        className: "excalidraw-hyperlinkContainer-input",
+        placeholder: t("labels.video.descriptionPlaceholder"),
+        value: descValue,
+        onChange: (e) => setDescValue(e.target.value),
+        autoFocus: true,
+        onKeyDown: (e) => {
+          e.stopPropagation();
+          if (e.key === KEYS27.ENTER || e.key === KEYS27.ESCAPE) {
+            handleDescriptionSubmit();
+          }
+        }
+      }
+    ) : /* @__PURE__ */ jsx47("div", { className: "excalidraw-hyperlinkContainer-link", children: element.description || t("labels.video.noDescription") }),
+    /* @__PURE__ */ jsxs26("div", { className: "excalidraw-hyperlinkContainer__buttons", children: [
+      !isEditing && /* @__PURE__ */ jsx47(
+        ToolButton,
+        {
+          type: "button",
+          title: t("buttons.editDescription"),
+          "aria-label": t("buttons.editDescription"),
+          onClick: () => setAppState({ showHyperlinkPopup: "editor" }),
+          icon: FreedrawIcon
+        }
+      ),
+      /* @__PURE__ */ jsx47(
+        ToolButton,
+        {
+          type: "button",
+          title: t("buttons.download"),
+          "aria-label": t("buttons.download"),
+          onClick: handleDownload,
+          icon: downloadIcon
+        }
+      )
+    ] })
+  ] });
+};
 var Hyperlink = ({
   element,
   scene,
   setAppState,
   onLinkOpen,
   setToast,
-  updateEmbedValidationStatus
+  updateEmbedValidationStatus,
+  files
 }) => {
   const elementsMap = scene.getNonDeletedElementsMap();
   const appState = useExcalidrawAppState();
@@ -11953,7 +12264,7 @@ var Hyperlink = ({
   if (appState.contextMenu || appState.selectedElementsAreBeingDragged || appState.resizingElement || appState.isRotating || appState.openMenu || appState.viewModeEnabled) {
     return null;
   }
-  return /* @__PURE__ */ jsxs26(
+  return /* @__PURE__ */ jsx47(
     "div",
     {
       className: "excalidraw-hyperlinkContainer",
@@ -11963,7 +12274,16 @@ var Hyperlink = ({
         width: POPUP_WIDTH,
         padding: POPUP_PADDING
       },
-      children: [
+      children: isLocalVideoEmbeddable(element) ? /* @__PURE__ */ jsx47(
+        LocalVideoPopup,
+        {
+          element,
+          files,
+          scene,
+          isEditing,
+          setAppState
+        }
+      ) : /* @__PURE__ */ jsxs26(Fragment8, { children: [
         isEditing ? /* @__PURE__ */ jsx47(
           "input",
           {
@@ -12056,7 +12376,7 @@ var Hyperlink = ({
             }
           )
         ] })
-      ]
+      ] })
     }
   );
 };
@@ -14191,7 +14511,7 @@ var useHandleLibrary = (opts) => {
 import clsx21 from "clsx";
 
 // components/LibraryMenuBrowseButton.tsx
-import { VERSIONS } from "@excalidraw/common";
+import { VERSIONS as VERSIONS2 } from "@excalidraw/common";
 import { jsx as jsx50 } from "react/jsx-runtime";
 var LibraryMenuBrowseButton = ({
   theme,
@@ -14203,7 +14523,7 @@ var LibraryMenuBrowseButton = ({
     "a",
     {
       className: "library-menu-browse-button",
-      href: `${define_import_meta_env_default.VITE_APP_LIBRARY_URL}?target=${window.name || "_blank"}&referrer=${referrer}&useHash=true&token=${id}&theme=${theme}&version=${VERSIONS.excalidrawLibrary}`,
+      href: `${define_import_meta_env_default.VITE_APP_LIBRARY_URL}?target=${window.name || "_blank"}&referrer=${referrer}&useHash=true&token=${id}&theme=${theme}&version=${VERSIONS2.excalidrawLibrary}`,
       target: "_excalidraw_libraries",
       children: t("labels.libraries")
     }
@@ -14383,11 +14703,11 @@ import OpenColor2 from "open-color";
 import { useCallback as useCallback7, useEffect as useEffect21, useRef as useRef15, useState as useState14 } from "react";
 import {
   EDITOR_LS_KEYS,
-  EXPORT_DATA_TYPES as EXPORT_DATA_TYPES2,
+  EXPORT_DATA_TYPES as EXPORT_DATA_TYPES3,
   MIME_TYPES as MIME_TYPES5,
-  VERSIONS as VERSIONS2,
+  VERSIONS as VERSIONS3,
   chunk,
-  getExportSource
+  getExportSource as getExportSource2
 } from "@excalidraw/common";
 
 // data/EditorLocalStorage.ts
@@ -14701,9 +15021,9 @@ var PublishLibrary = ({
     }
     const previewImage = await generatePreviewImage(clonedLibItems);
     const libContent = {
-      type: EXPORT_DATA_TYPES2.excalidrawLibrary,
-      version: VERSIONS2.excalidrawLibrary,
-      source: getExportSource(),
+      type: EXPORT_DATA_TYPES3.excalidrawLibrary,
+      version: VERSIONS3.excalidrawLibrary,
+      source: getExportSource2(),
       libraryItems: clonedLibItems
     };
     const content = JSON.stringify(libContent, null, 2);
@@ -15566,7 +15886,7 @@ var LibraryUnit = memo(
 var EmptyLibraryUnit = () => /* @__PURE__ */ jsx62("div", { className: "library-unit library-unit--skeleton" });
 
 // components/LibraryMenuSection.tsx
-import { Fragment as Fragment8, jsx as jsx63 } from "react/jsx-runtime";
+import { Fragment as Fragment9, jsx as jsx63 } from "react/jsx-runtime";
 var LibraryMenuSectionGrid = ({
   children
 }) => {
@@ -15591,7 +15911,7 @@ var LibraryMenuSection = memo2(
         });
       }
     }, [index, items.length, startTransition, itemsRenderedPerBatch]);
-    return /* @__PURE__ */ jsx63(Fragment8, { children: items.map((item, i) => {
+    return /* @__PURE__ */ jsx63(Fragment9, { children: items.map((item, i) => {
       return i < index ? /* @__PURE__ */ jsx63(
         LibraryUnit,
         {
@@ -15726,7 +16046,7 @@ var TextField = forwardRef3(
 );
 
 // components/LibraryMenuItems.tsx
-import { Fragment as Fragment9, jsx as jsx66, jsxs as jsxs35 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx66, jsxs as jsxs35 } from "react/jsx-runtime";
 var ITEMS_RENDERED_PER_BATCH = 17;
 var CACHED_ITEMS_RENDERED_PER_BATCH = 64;
 function LibraryMenuItems({
@@ -15885,7 +16205,7 @@ function LibraryMenuItems({
       searchInputRef.current?.focus();
     });
   }, []);
-  const JSX_whenNotSearching = !IS_SEARCHING && /* @__PURE__ */ jsxs35(Fragment9, { children: [
+  const JSX_whenNotSearching = !IS_SEARCHING && /* @__PURE__ */ jsxs35(Fragment10, { children: [
     !IS_LIBRARY_EMPTY && /* @__PURE__ */ jsx66("div", { className: "library-menu-items-container__header", children: t("labels.personalLib") }),
     !pendingElements.length && !unpublishedItems.length ? /* @__PURE__ */ jsxs35("div", { className: "library-menu-items__no-items", children: [
       !publishedItems.length && /* @__PURE__ */ jsx66("div", { className: "library-menu-items__no-items__label", children: t("library.noItems") }),
@@ -15937,7 +16257,7 @@ function LibraryMenuItems({
       }
     ) })
   ] });
-  const JSX_whenSearching = IS_SEARCHING && /* @__PURE__ */ jsxs35(Fragment9, { children: [
+  const JSX_whenSearching = IS_SEARCHING && /* @__PURE__ */ jsxs35(Fragment10, { children: [
     /* @__PURE__ */ jsxs35("div", { className: "library-menu-items-container__header", children: [
       t("library.search.heading"),
       !isLoading && /* @__PURE__ */ jsxs35(
@@ -16674,7 +16994,7 @@ var ToolPopover = ({
 };
 
 // components/Actions.tsx
-import { Fragment as Fragment10, jsx as jsx71, jsxs as jsxs40 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx71, jsxs as jsxs40 } from "react/jsx-runtime";
 var PROPERTIES_CLASSES = clsx34([
   CLASSES3.SHAPE_ACTIONS_THEME_SCOPE,
   "properties-content"
@@ -16721,19 +17041,19 @@ var SelectedShapeActions = ({
     showFillIcons && renderAction("changeFillStyle"),
     (hasStrokeWidth(appState.activeTool.type) || targetElements.some((element) => hasStrokeWidth(element.type))) && renderAction("changeStrokeWidth"),
     (appState.activeTool.type === "freedraw" || targetElements.some((element) => element.type === "freedraw")) && renderAction("changeStrokeShape"),
-    (hasStrokeStyle(appState.activeTool.type) || targetElements.some((element) => hasStrokeStyle(element.type))) && /* @__PURE__ */ jsxs40(Fragment10, { children: [
+    (hasStrokeStyle(appState.activeTool.type) || targetElements.some((element) => hasStrokeStyle(element.type))) && /* @__PURE__ */ jsxs40(Fragment11, { children: [
       renderAction("changeStrokeStyle"),
       renderAction("changeSloppiness")
     ] }),
-    (canChangeRoundness(appState.activeTool.type) || targetElements.some((element) => canChangeRoundness(element.type))) && /* @__PURE__ */ jsx71(Fragment10, { children: renderAction("changeRoundness") }),
-    (toolIsArrow(appState.activeTool.type) || targetElements.some((element) => toolIsArrow(element.type))) && /* @__PURE__ */ jsx71(Fragment10, { children: renderAction("changeArrowType") }),
-    (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment10, { children: [
+    (canChangeRoundness(appState.activeTool.type) || targetElements.some((element) => canChangeRoundness(element.type))) && /* @__PURE__ */ jsx71(Fragment11, { children: renderAction("changeRoundness") }),
+    (toolIsArrow(appState.activeTool.type) || targetElements.some((element) => toolIsArrow(element.type))) && /* @__PURE__ */ jsx71(Fragment11, { children: renderAction("changeArrowType") }),
+    (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment11, { children: [
       renderAction("changeFontFamily"),
       renderAction("changeFontSize"),
       (appState.activeTool.type === "text" || suppportsHorizontalAlign(targetElements, elementsMap)) && renderAction("changeTextAlign")
     ] }),
     shouldAllowVerticalAlign(targetElements, elementsMap) && renderAction("changeVerticalAlign"),
-    (canHaveArrowheads(appState.activeTool.type) || targetElements.some((element) => canHaveArrowheads(element.type))) && /* @__PURE__ */ jsx71(Fragment10, { children: renderAction("changeArrowhead") }),
+    (canHaveArrowheads(appState.activeTool.type) || targetElements.some((element) => canHaveArrowheads(element.type))) && /* @__PURE__ */ jsx71(Fragment11, { children: renderAction("changeArrowhead") }),
     renderAction("changeOpacity"),
     /* @__PURE__ */ jsxs40("fieldset", { children: [
       /* @__PURE__ */ jsx71("legend", { children: t("labels.layers") }),
@@ -16747,11 +17067,11 @@ var SelectedShapeActions = ({
     showAlignActions && !isSingleElementBoundContainer && /* @__PURE__ */ jsxs40("fieldset", { children: [
       /* @__PURE__ */ jsx71("legend", { children: t("labels.align") }),
       /* @__PURE__ */ jsxs40("div", { className: "buttonList", children: [
-        isRTL2 ? /* @__PURE__ */ jsxs40(Fragment10, { children: [
+        isRTL2 ? /* @__PURE__ */ jsxs40(Fragment11, { children: [
           renderAction("alignRight"),
           renderAction("alignHorizontallyCentered"),
           renderAction("alignLeft")
-        ] }) : /* @__PURE__ */ jsxs40(Fragment10, { children: [
+        ] }) : /* @__PURE__ */ jsxs40(Fragment11, { children: [
           renderAction("alignLeft"),
           renderAction("alignHorizontallyCentered"),
           renderAction("alignRight")
@@ -16851,7 +17171,7 @@ var CombinedShapeProperties = ({
               )) && renderAction("changeStrokeWidth"),
               (hasStrokeStyle(appState.activeTool.type) || targetElements.some(
                 (element) => hasStrokeStyle(element.type)
-              )) && /* @__PURE__ */ jsxs40(Fragment10, { children: [
+              )) && /* @__PURE__ */ jsxs40(Fragment11, { children: [
                 renderAction("changeStrokeStyle"),
                 renderAction("changeSloppiness")
               ] }),
@@ -17098,11 +17418,11 @@ var CombinedExtraActions = ({
               showAlignActions && !isSingleElementBoundContainer && /* @__PURE__ */ jsxs40("fieldset", { children: [
                 /* @__PURE__ */ jsx71("legend", { children: t("labels.align") }),
                 /* @__PURE__ */ jsxs40("div", { className: "buttonList", children: [
-                  isRTL2 ? /* @__PURE__ */ jsxs40(Fragment10, { children: [
+                  isRTL2 ? /* @__PURE__ */ jsxs40(Fragment11, { children: [
                     renderAction("alignRight"),
                     renderAction("alignHorizontallyCentered"),
                     renderAction("alignLeft")
-                  ] }) : /* @__PURE__ */ jsxs40(Fragment10, { children: [
+                  ] }) : /* @__PURE__ */ jsxs40(Fragment11, { children: [
                     renderAction("alignLeft"),
                     renderAction("alignHorizontallyCentered"),
                     renderAction("alignRight")
@@ -17195,7 +17515,7 @@ var CompactShapeActions = ({
       }
     ),
     showLineEditorAction && /* @__PURE__ */ jsx71("div", { className: "compact-action-item", children: renderAction("toggleLinearEditor") }),
-    (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment10, { children: [
+    (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment11, { children: [
       /* @__PURE__ */ jsx71("div", { className: "compact-action-item", children: renderAction("changeFontFamily") }),
       /* @__PURE__ */ jsx71(
         CombinedTextProperties,
@@ -17301,7 +17621,7 @@ var MobileShapeActions = ({
                   targetElements
                 }
               ),
-              (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment10, { children: [
+              (appState.activeTool.type === "text" || targetElements.some(isTextElement6)) && /* @__PURE__ */ jsxs40(Fragment11, { children: [
                 /* @__PURE__ */ jsx71("div", { className: "compact-action-item", children: renderAction("changeFontFamily") }),
                 /* @__PURE__ */ jsx71(
                   CombinedTextProperties,
@@ -17378,7 +17698,7 @@ var ShapesSwitcher = ({
   const lassoToolSelected = isFullStylesPanel && activeTool.type === "lasso" && app.state.preferredSelectionTool.type !== "lasso";
   const embeddableToolSelected = activeTool.type === "embeddable";
   const { TTDDialogTriggerTunnel } = useTunnels();
-  return /* @__PURE__ */ jsxs40(Fragment10, { children: [
+  return /* @__PURE__ */ jsxs40(Fragment11, { children: [
     getToolbarTools(app).map(
       ({ value, icon, key, numericKey, fillable }, index) => {
         if (UIOptions.tools?.[value] === false) {
@@ -22372,6 +22692,97 @@ var ElementCanvasButtons = ({
   );
 };
 
+// components/VideoPlayer.tsx
+import { useRef as useRef25, useState as useState26 } from "react";
+import { jsx as jsx79, jsxs as jsxs43 } from "react/jsx-runtime";
+var VideoPlayer = ({
+  dataURL,
+  isActive,
+  title = "Embedded video"
+}) => {
+  const videoRef = useRef25(null);
+  const [isLoading, setIsLoading] = useState26(true);
+  const [hasError, setHasError] = useState26(false);
+  const hasValidSrc = dataURL && dataURL.length > 0;
+  return /* @__PURE__ */ jsxs43(
+    "div",
+    {
+      style: {
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "var(--default-bg-color)"
+      },
+      children: [
+        isLoading && !hasError && hasValidSrc && /* @__PURE__ */ jsxs43(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+              color: "var(--text-primary-color)"
+            },
+            children: [
+              /* @__PURE__ */ jsx79(Spinner_default, { size: "2em" }),
+              /* @__PURE__ */ jsx79("span", { style: { fontSize: "0.875em", opacity: 0.7 }, children: "Loading video..." })
+            ]
+          }
+        ),
+        (hasError || !hasValidSrc) && /* @__PURE__ */ jsxs43(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+              color: "var(--color-danger)"
+            },
+            children: [
+              /* @__PURE__ */ jsx79("span", { style: { fontSize: "1.5em" }, children: "!" }),
+              /* @__PURE__ */ jsx79("span", { style: { fontSize: "0.875em" }, children: !hasValidSrc ? "Video not found" : "Failed to load video" })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsx79(
+          "video",
+          {
+            ref: videoRef,
+            src: dataURL,
+            controls: isActive,
+            playsInline: true,
+            title,
+            className: "excalidraw__embeddable__video",
+            onLoadedData: () => setIsLoading(false),
+            onError: (e) => {
+              console.error(
+                "VideoPlayer: Failed to load video",
+                e.currentTarget.error
+              );
+              setIsLoading(false);
+              setHasError(true);
+            },
+            style: {
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              pointerEvents: isActive ? "auto" : "none",
+              opacity: isLoading || hasError ? 0 : 1
+            }
+          }
+        )
+      ]
+    }
+  );
+};
+
 // laser-trails.ts
 import { DEFAULT_LASER_COLOR, easeOut } from "@excalidraw/common";
 
@@ -23734,36 +24145,36 @@ var eraserTest = (pathSegment, element, elementsMap, zoom) => {
 };
 
 // components/BraveMeasureTextError.tsx
-import { jsx as jsx79, jsxs as jsxs43 } from "react/jsx-runtime";
+import { jsx as jsx80, jsxs as jsxs44 } from "react/jsx-runtime";
 var BraveMeasureTextError = () => {
-  return /* @__PURE__ */ jsxs43("div", { "data-testid": "brave-measure-text-error", children: [
-    /* @__PURE__ */ jsx79("p", { children: /* @__PURE__ */ jsx79(
+  return /* @__PURE__ */ jsxs44("div", { "data-testid": "brave-measure-text-error", children: [
+    /* @__PURE__ */ jsx80("p", { children: /* @__PURE__ */ jsx80(
       Trans_default,
       {
         i18nKey: "errors.brave_measure_text_error.line1",
-        bold: (el) => /* @__PURE__ */ jsx79("span", { style: { fontWeight: 600 }, children: el })
+        bold: (el) => /* @__PURE__ */ jsx80("span", { style: { fontWeight: 600 }, children: el })
       }
     ) }),
-    /* @__PURE__ */ jsx79("p", { children: /* @__PURE__ */ jsx79(
+    /* @__PURE__ */ jsx80("p", { children: /* @__PURE__ */ jsx80(
       Trans_default,
       {
         i18nKey: "errors.brave_measure_text_error.line2",
-        bold: (el) => /* @__PURE__ */ jsx79("span", { style: { fontWeight: 600 }, children: el })
+        bold: (el) => /* @__PURE__ */ jsx80("span", { style: { fontWeight: 600 }, children: el })
       }
     ) }),
-    /* @__PURE__ */ jsx79("p", { children: /* @__PURE__ */ jsx79(
+    /* @__PURE__ */ jsx80("p", { children: /* @__PURE__ */ jsx80(
       Trans_default,
       {
         i18nKey: "errors.brave_measure_text_error.line3",
-        link: (el) => /* @__PURE__ */ jsx79("a", { href: "http://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq#turning-off-aggresive-block-fingerprinting-in-brave-browser", children: el })
+        link: (el) => /* @__PURE__ */ jsx80("a", { href: "http://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq#turning-off-aggresive-block-fingerprinting-in-brave-browser", children: el })
       }
     ) }),
-    /* @__PURE__ */ jsx79("p", { children: /* @__PURE__ */ jsx79(
+    /* @__PURE__ */ jsx80("p", { children: /* @__PURE__ */ jsx80(
       Trans_default,
       {
         i18nKey: "errors.brave_measure_text_error.line4",
-        issueLink: (el) => /* @__PURE__ */ jsx79("a", { href: "https://github.com/excalidraw/excalidraw/issues/new", children: el }),
-        discordLink: (el) => /* @__PURE__ */ jsxs43("a", { href: "https://discord.gg/UexuTaE", children: [
+        issueLink: (el) => /* @__PURE__ */ jsx80("a", { href: "https://github.com/excalidraw/excalidraw/issues/new", children: el }),
+        discordLink: (el) => /* @__PURE__ */ jsxs44("a", { href: "https://discord.gg/UexuTaE", children: [
           el,
           "."
         ] })
@@ -23775,14 +24186,14 @@ var BraveMeasureTextError_default = BraveMeasureTextError;
 
 // components/ContextMenu.tsx
 import clsx37 from "clsx";
-import React31 from "react";
+import React32 from "react";
 
 // components/Popover.tsx
-import { useLayoutEffect as useLayoutEffect4, useRef as useRef25, useEffect as useEffect30 } from "react";
+import { useLayoutEffect as useLayoutEffect4, useRef as useRef26, useEffect as useEffect30 } from "react";
 import { unstable_batchedUpdates as unstable_batchedUpdates2 } from "react-dom";
 import { KEYS as KEYS45, queryFocusableElements as queryFocusableElements2 } from "@excalidraw/common";
 import clsx36 from "clsx";
-import { jsx as jsx80 } from "react/jsx-runtime";
+import { jsx as jsx81 } from "react/jsx-runtime";
 var Popover8 = ({
   children,
   left,
@@ -23795,7 +24206,7 @@ var Popover8 = ({
   viewportHeight = window.innerHeight,
   className
 }) => {
-  const popoverRef = useRef25(null);
+  const popoverRef = useRef26(null);
   useEffect30(() => {
     const container = popoverRef.current;
     if (!container) {
@@ -23833,7 +24244,7 @@ var Popover8 = ({
     container.addEventListener("keydown", handleKeyDown);
     return () => container.removeEventListener("keydown", handleKeyDown);
   }, []);
-  const lastInitializedPosRef = useRef25(
+  const lastInitializedPosRef = useRef26(
     null
   );
   useLayoutEffect4(() => {
@@ -23883,13 +24294,13 @@ var Popover8 = ({
       return () => document.removeEventListener("pointerdown", handler, false);
     }
   }, [onCloseRequest]);
-  return /* @__PURE__ */ jsx80("div", { className: clsx36("popover", className), ref: popoverRef, tabIndex: -1, children });
+  return /* @__PURE__ */ jsx81("div", { className: clsx36("popover", className), ref: popoverRef, tabIndex: -1, children });
 };
 
 // components/ContextMenu.tsx
-import { jsx as jsx81, jsxs as jsxs44 } from "react/jsx-runtime";
+import { jsx as jsx82, jsxs as jsxs45 } from "react/jsx-runtime";
 var CONTEXT_MENU_SEPARATOR = "separator";
-var ContextMenu = React31.memo(
+var ContextMenu = React32.memo(
   ({ actionManager, items, top, left, onClose }) => {
     const appState = useExcalidrawAppState();
     const elements = useExcalidrawElements();
@@ -23904,7 +24315,7 @@ var ContextMenu = React31.memo(
       }
       return acc;
     }, []);
-    return /* @__PURE__ */ jsx81(
+    return /* @__PURE__ */ jsx82(
       Popover8,
       {
         onCloseRequest: () => {
@@ -23918,7 +24329,7 @@ var ContextMenu = React31.memo(
         viewportWidth: appState.width,
         viewportHeight: appState.height,
         className: "context-menu-popover",
-        children: /* @__PURE__ */ jsx81(
+        children: /* @__PURE__ */ jsx82(
           "ul",
           {
             className: "context-menu",
@@ -23928,7 +24339,7 @@ var ContextMenu = React31.memo(
                 if (!filteredItems[idx - 1] || filteredItems[idx - 1] === CONTEXT_MENU_SEPARATOR) {
                   return null;
                 }
-                return /* @__PURE__ */ jsx81("hr", { className: "context-menu-item-separator" }, idx);
+                return /* @__PURE__ */ jsx82("hr", { className: "context-menu-item-separator" }, idx);
               }
               const actionName = item.name;
               let label = "";
@@ -23945,7 +24356,7 @@ var ContextMenu = React31.memo(
                   label = t(item.label);
                 }
               }
-              return /* @__PURE__ */ jsx81(
+              return /* @__PURE__ */ jsx82(
                 "li",
                 {
                   "data-testid": actionName,
@@ -23954,7 +24365,7 @@ var ContextMenu = React31.memo(
                       actionManager.executeAction(item, "contextMenu");
                     });
                   },
-                  children: /* @__PURE__ */ jsxs44(
+                  children: /* @__PURE__ */ jsxs45(
                     "button",
                     {
                       type: "button",
@@ -23963,8 +24374,8 @@ var ContextMenu = React31.memo(
                         checkmark: item.checked?.(appState)
                       }),
                       children: [
-                        /* @__PURE__ */ jsx81("div", { className: "context-menu-item__label", children: label }),
-                        /* @__PURE__ */ jsx81("kbd", { className: "context-menu-item__shortcut", children: actionName ? getShortcutFromShortcutName(actionName) : "" })
+                        /* @__PURE__ */ jsx82("div", { className: "context-menu-item__label", children: label }),
+                        /* @__PURE__ */ jsx82("kbd", { className: "context-menu-item__shortcut", children: actionName ? getShortcutFromShortcutName(actionName) : "" })
                       ]
                     }
                   )
@@ -23980,18 +24391,18 @@ var ContextMenu = React31.memo(
 );
 
 // components/FollowMode/FollowMode.tsx
-import { jsx as jsx82, jsxs as jsxs45 } from "react/jsx-runtime";
+import { jsx as jsx83, jsxs as jsxs46 } from "react/jsx-runtime";
 var FollowMode = ({
   height,
   width,
   userToFollow,
   onDisconnect
 }) => {
-  return /* @__PURE__ */ jsx82("div", { className: "follow-mode", style: { width, height }, children: /* @__PURE__ */ jsxs45("div", { className: "follow-mode__badge", children: [
-    /* @__PURE__ */ jsxs45("div", { className: "follow-mode__badge__label", children: [
+  return /* @__PURE__ */ jsx83("div", { className: "follow-mode", style: { width, height }, children: /* @__PURE__ */ jsxs46("div", { className: "follow-mode__badge", children: [
+    /* @__PURE__ */ jsxs46("div", { className: "follow-mode__badge__label", children: [
       "Following",
       " ",
-      /* @__PURE__ */ jsx82(
+      /* @__PURE__ */ jsx83(
         "span",
         {
           className: "follow-mode__badge__username",
@@ -24000,7 +24411,7 @@ var FollowMode = ({
         }
       )
     ] }),
-    /* @__PURE__ */ jsx82(
+    /* @__PURE__ */ jsx83(
       "button",
       {
         type: "button",
@@ -24015,7 +24426,7 @@ var FollowMode_default = FollowMode;
 
 // components/LayerUI.tsx
 import clsx59 from "clsx";
-import React42 from "react";
+import React43 from "react";
 import {
   CLASSES as CLASSES8,
   DEFAULT_SIDEBAR as DEFAULT_SIDEBAR6,
@@ -24030,14 +24441,14 @@ import { ShapeCache as ShapeCache3 } from "@excalidraw/element";
 
 // components/LoadingMessage.tsx
 import clsx38 from "clsx";
-import { useState as useState26, useEffect as useEffect31 } from "react";
+import { useState as useState27, useEffect as useEffect31 } from "react";
 import { THEME as THEME11 } from "@excalidraw/common";
-import { jsx as jsx83, jsxs as jsxs46 } from "react/jsx-runtime";
+import { jsx as jsx84, jsxs as jsxs47 } from "react/jsx-runtime";
 var LoadingMessage = ({
   delay,
   theme
 }) => {
-  const [isWaiting, setIsWaiting] = useState26(!!delay);
+  const [isWaiting, setIsWaiting] = useState27(!!delay);
   useEffect31(() => {
     if (!delay) {
       return;
@@ -24050,15 +24461,15 @@ var LoadingMessage = ({
   if (isWaiting) {
     return null;
   }
-  return /* @__PURE__ */ jsxs46(
+  return /* @__PURE__ */ jsxs47(
     "div",
     {
       className: clsx38("LoadingMessage", {
         "LoadingMessage--dark": theme === THEME11.DARK
       }),
       children: [
-        /* @__PURE__ */ jsx83("div", { children: /* @__PURE__ */ jsx83(Spinner_default, {}) }),
-        /* @__PURE__ */ jsx83("div", { className: "LoadingMessage-text", children: t("labels.loadingScene") })
+        /* @__PURE__ */ jsx84("div", { children: /* @__PURE__ */ jsx84(Spinner_default, {}) }),
+        /* @__PURE__ */ jsx84("div", { className: "LoadingMessage-text", children: t("labels.loadingScene") })
       ]
     }
   );
@@ -24066,14 +24477,14 @@ var LoadingMessage = ({
 
 // components/LockButton.tsx
 import clsx39 from "clsx";
-import { jsx as jsx84, jsxs as jsxs47 } from "react/jsx-runtime";
+import { jsx as jsx85, jsxs as jsxs48 } from "react/jsx-runtime";
 var DEFAULT_SIZE = "medium";
 var ICONS2 = {
   CHECKED: LockedIcon,
   UNCHECKED: UnlockedIcon
 };
 var LockButton = (props) => {
-  return /* @__PURE__ */ jsxs47(
+  return /* @__PURE__ */ jsxs48(
     "label",
     {
       className: clsx39(
@@ -24085,7 +24496,7 @@ var LockButton = (props) => {
       ),
       title: `${props.title} \u2014 Q`,
       children: [
-        /* @__PURE__ */ jsx84(
+        /* @__PURE__ */ jsx85(
           "input",
           {
             className: "ToolIcon_type_checkbox",
@@ -24097,23 +24508,23 @@ var LockButton = (props) => {
             "data-testid": "toolbar-lock"
           }
         ),
-        /* @__PURE__ */ jsx84("div", { className: "ToolIcon__icon", children: props.checked ? ICONS2.CHECKED : ICONS2.UNCHECKED })
+        /* @__PURE__ */ jsx85("div", { className: "ToolIcon__icon", children: props.checked ? ICONS2.CHECKED : ICONS2.UNCHECKED })
       ]
     }
   );
 };
 
 // components/MobileToolBar.tsx
-import { useState as useState27, useEffect as useEffect32 } from "react";
+import { useState as useState28, useEffect as useEffect32 } from "react";
 import clsx41 from "clsx";
 import { KEYS as KEYS47, capitalizeString as capitalizeString4 } from "@excalidraw/common";
 
 // components/HandButton.tsx
 import clsx40 from "clsx";
 import { KEYS as KEYS46 } from "@excalidraw/common";
-import { jsx as jsx85 } from "react/jsx-runtime";
+import { jsx as jsx86 } from "react/jsx-runtime";
 var HandButton = (props) => {
-  return /* @__PURE__ */ jsx85(
+  return /* @__PURE__ */ jsx86(
     ToolButton,
     {
       className: clsx40("Shape", { fillable: false, active: props.checked }),
@@ -24132,7 +24543,7 @@ var HandButton = (props) => {
 };
 
 // components/MobileToolBar.tsx
-import { Fragment as Fragment11, jsx as jsx86, jsxs as jsxs48 } from "react/jsx-runtime";
+import { Fragment as Fragment12, jsx as jsx87, jsxs as jsxs49 } from "react/jsx-runtime";
 var SHAPE_TOOLS = [
   {
     type: "rectangle",
@@ -24176,9 +24587,9 @@ var MobileToolBar = ({
   setAppState
 }) => {
   const activeTool = app.state.activeTool;
-  const [isOtherShapesMenuOpen, setIsOtherShapesMenuOpen] = useState27(false);
-  const [lastActiveGenericShape, setLastActiveGenericShape] = useState27("rectangle");
-  const [lastActiveLinearElement, setLastActiveLinearElement] = useState27("arrow");
+  const [isOtherShapesMenuOpen, setIsOtherShapesMenuOpen] = useState28(false);
+  const [lastActiveGenericShape, setLastActiveGenericShape] = useState28("rectangle");
+  const [lastActiveLinearElement, setLastActiveLinearElement] = useState28("arrow");
   useEffect32(() => {
     if (activeTool.type === "rectangle" || activeTool.type === "diamond" || activeTool.type === "ellipse") {
       setLastActiveGenericShape(activeTool.type);
@@ -24206,7 +24617,7 @@ var MobileToolBar = ({
       app.setActiveTool({ type: toolType });
     }
   };
-  const [toolbarWidth, setToolbarWidth] = useState27(0);
+  const [toolbarWidth, setToolbarWidth] = useState28(0);
   const WIDTH = 36;
   const GAP = 4;
   const MIN_TOOLS = 7;
@@ -24235,7 +24646,7 @@ var MobileToolBar = ({
   });
   const extraToolSelected = extraTools.includes(activeTool.type);
   const extraIcon = extraToolSelected ? activeTool.type === "text" ? TextIcon : activeTool.type === "image" ? ImageIcon : activeTool.type === "frame" ? frameToolIcon : activeTool.type === "embeddable" ? EmbedIcon : activeTool.type === "laser" ? laserPointerToolIcon : activeTool.type === "magicframe" ? MagicIcon : extraToolsIcon : extraToolsIcon;
-  return /* @__PURE__ */ jsxs48(
+  return /* @__PURE__ */ jsxs49(
     "div",
     {
       className: "mobile-toolbar",
@@ -24245,7 +24656,7 @@ var MobileToolBar = ({
         }
       },
       children: [
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           HandButton,
           {
             checked: isHandToolActive(app.state),
@@ -24254,7 +24665,7 @@ var MobileToolBar = ({
             isMobile: true
           }
         ),
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           ToolPopover,
           {
             app,
@@ -24277,7 +24688,7 @@ var MobileToolBar = ({
             ) || SELECTION_TOOLS[0]
           }
         ),
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           ToolButton,
           {
             className: clsx41({
@@ -24293,7 +24704,7 @@ var MobileToolBar = ({
             onChange: () => handleToolChange("freedraw")
           }
         ),
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           ToolButton,
           {
             className: clsx41({
@@ -24309,7 +24720,7 @@ var MobileToolBar = ({
             onChange: () => handleToolChange("eraser")
           }
         ),
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           ToolPopover,
           {
             app,
@@ -24332,7 +24743,7 @@ var MobileToolBar = ({
             displayedOption: SHAPE_TOOLS.find((tool) => tool.type === lastActiveGenericShape) || SHAPE_TOOLS[0]
           }
         ),
-        /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsx87(
           ToolPopover,
           {
             app,
@@ -24358,7 +24769,7 @@ var MobileToolBar = ({
             ) || LINEAR_ELEMENT_TOOLS[0]
           }
         ),
-        showTextToolOutside && /* @__PURE__ */ jsx86(
+        showTextToolOutside && /* @__PURE__ */ jsx87(
           ToolButton,
           {
             className: clsx41({
@@ -24374,7 +24785,7 @@ var MobileToolBar = ({
             onChange: () => handleToolChange("text")
           }
         ),
-        showImageToolOutside && /* @__PURE__ */ jsx86(
+        showImageToolOutside && /* @__PURE__ */ jsx87(
           ToolButton,
           {
             className: clsx41({
@@ -24390,7 +24801,7 @@ var MobileToolBar = ({
             onChange: () => handleToolChange("image")
           }
         ),
-        showFrameToolOutside && /* @__PURE__ */ jsx86(
+        showFrameToolOutside && /* @__PURE__ */ jsx87(
           ToolButton,
           {
             className: clsx41({ active: frameToolSelected }),
@@ -24404,8 +24815,8 @@ var MobileToolBar = ({
             onChange: () => handleToolChange("frame")
           }
         ),
-        /* @__PURE__ */ jsxs48(DropdownMenu_default, { open: isOtherShapesMenuOpen, placement: "top", children: [
-          /* @__PURE__ */ jsx86(
+        /* @__PURE__ */ jsxs49(DropdownMenu_default, { open: isOtherShapesMenuOpen, placement: "top", children: [
+          /* @__PURE__ */ jsx87(
             DropdownMenu_default.Trigger,
             {
               className: clsx41(
@@ -24429,14 +24840,14 @@ var MobileToolBar = ({
               children: extraIcon
             }
           ),
-          /* @__PURE__ */ jsxs48(
+          /* @__PURE__ */ jsxs49(
             DropdownMenu_default.Content,
             {
               onClickOutside: () => setIsOtherShapesMenuOpen(false),
               onSelect: () => setIsOtherShapesMenuOpen(false),
               className: "App-toolbar__extra-tools-dropdown",
               children: [
-                !showTextToolOutside && /* @__PURE__ */ jsx86(
+                !showTextToolOutside && /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setActiveTool({ type: "text" }),
@@ -24447,7 +24858,7 @@ var MobileToolBar = ({
                     children: t("toolBar.text")
                   }
                 ),
-                !showImageToolOutside && /* @__PURE__ */ jsx86(
+                !showImageToolOutside && /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setActiveTool({ type: "image" }),
@@ -24457,7 +24868,7 @@ var MobileToolBar = ({
                     children: t("toolBar.image")
                   }
                 ),
-                !showFrameToolOutside && /* @__PURE__ */ jsx86(
+                !showFrameToolOutside && /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setActiveTool({ type: "frame" }),
@@ -24468,7 +24879,7 @@ var MobileToolBar = ({
                     children: t("toolBar.frame")
                   }
                 ),
-                /* @__PURE__ */ jsx86(
+                /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setActiveTool({ type: "embeddable" }),
@@ -24478,7 +24889,7 @@ var MobileToolBar = ({
                     children: t("toolBar.embeddable")
                   }
                 ),
-                /* @__PURE__ */ jsx86(
+                /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setActiveTool({ type: "laser" }),
@@ -24489,9 +24900,9 @@ var MobileToolBar = ({
                     children: t("toolBar.laser")
                   }
                 ),
-                /* @__PURE__ */ jsx86("div", { style: { margin: "6px 0", fontSize: 14, fontWeight: 600 }, children: "Generate" }),
-                app.props.aiEnabled !== false && /* @__PURE__ */ jsx86(TTDDialogTriggerTunnel.Out, {}),
-                /* @__PURE__ */ jsx86(
+                /* @__PURE__ */ jsx87("div", { style: { margin: "6px 0", fontSize: 14, fontWeight: 600 }, children: "Generate" }),
+                app.props.aiEnabled !== false && /* @__PURE__ */ jsx87(TTDDialogTriggerTunnel.Out, {}),
+                /* @__PURE__ */ jsx87(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.setOpenDialog({ name: "ttd", tab: "mermaid" }),
@@ -24500,7 +24911,7 @@ var MobileToolBar = ({
                     children: t("toolBar.mermaidToExcalidraw")
                   }
                 ),
-                app.props.aiEnabled !== false && app.plugins.diagramToCode && /* @__PURE__ */ jsx86(Fragment11, { children: /* @__PURE__ */ jsxs48(
+                app.props.aiEnabled !== false && app.plugins.diagramToCode && /* @__PURE__ */ jsx87(Fragment12, { children: /* @__PURE__ */ jsxs49(
                   DropdownMenu_default.Item,
                   {
                     onSelect: () => app.onMagicframeToolSelect(),
@@ -24508,7 +24919,7 @@ var MobileToolBar = ({
                     "data-testid": "toolbar-magicframe",
                     children: [
                       t("toolBar.magicframe"),
-                      /* @__PURE__ */ jsx86(DropdownMenu_default.Item.Badge, { children: "AI" })
+                      /* @__PURE__ */ jsx87(DropdownMenu_default.Item.Badge, { children: "AI" })
                     ]
                   }
                 ) })
@@ -24523,12 +24934,12 @@ var MobileToolBar = ({
 
 // components/FixedSideContainer.tsx
 import clsx42 from "clsx";
-import { jsx as jsx87 } from "react/jsx-runtime";
+import { jsx as jsx88 } from "react/jsx-runtime";
 var FixedSideContainer = ({
   children,
   side,
   className
-}) => /* @__PURE__ */ jsx87(
+}) => /* @__PURE__ */ jsx88(
   "div",
   {
     className: clsx42(
@@ -24542,13 +24953,13 @@ var FixedSideContainer = ({
 
 // components/PenModeButton.tsx
 import clsx43 from "clsx";
-import { jsx as jsx88, jsxs as jsxs49 } from "react/jsx-runtime";
+import { jsx as jsx89, jsxs as jsxs50 } from "react/jsx-runtime";
 var DEFAULT_SIZE2 = "medium";
 var PenModeButton = (props) => {
   if (!props.penDetected) {
     return null;
   }
-  return /* @__PURE__ */ jsxs49(
+  return /* @__PURE__ */ jsxs50(
     "label",
     {
       className: clsx43(
@@ -24560,7 +24971,7 @@ var PenModeButton = (props) => {
       ),
       title: `${props.title}`,
       children: [
-        /* @__PURE__ */ jsx88(
+        /* @__PURE__ */ jsx89(
           "input",
           {
             className: "ToolIcon_type_checkbox",
@@ -24571,14 +24982,14 @@ var PenModeButton = (props) => {
             "aria-label": props.title
           }
         ),
-        /* @__PURE__ */ jsx88("div", { className: "ToolIcon__icon", children: PenModeIcon })
+        /* @__PURE__ */ jsx89("div", { className: "ToolIcon__icon", children: PenModeIcon })
       ]
     }
   );
 };
 
 // components/MobileMenu.tsx
-import { Fragment as Fragment12, jsx as jsx89, jsxs as jsxs50 } from "react/jsx-runtime";
+import { Fragment as Fragment13, jsx as jsx90, jsxs as jsxs51 } from "react/jsx-runtime";
 var MobileMenu = ({
   appState,
   elements,
@@ -24602,9 +25013,9 @@ var MobileMenu = ({
     if (appState.openDialog?.name === "elementLinkSelector") {
       return null;
     }
-    const topRightUI = /* @__PURE__ */ jsxs50("div", { className: "excalidraw-ui-top-right", children: [
-      renderTopRightUI?.(true, appState) ?? (!appState.viewModeEnabled && /* @__PURE__ */ jsxs50(Fragment12, { children: [
-        /* @__PURE__ */ jsx89(
+    const topRightUI = /* @__PURE__ */ jsxs51("div", { className: "excalidraw-ui-top-right", children: [
+      renderTopRightUI?.(true, appState) ?? (!appState.viewModeEnabled && /* @__PURE__ */ jsxs51(Fragment13, { children: [
+        /* @__PURE__ */ jsx90(
           PenModeButton,
           {
             checked: appState.penMode,
@@ -24614,15 +25025,15 @@ var MobileMenu = ({
             penDetected: appState.penDetected
           }
         ),
-        /* @__PURE__ */ jsx89(DefaultSidebarTriggerTunnel.Out, {})
+        /* @__PURE__ */ jsx90(DefaultSidebarTriggerTunnel.Out, {})
       ] })),
-      appState.viewModeEnabled && /* @__PURE__ */ jsx89(ExitViewModeButton, { actionManager })
+      appState.viewModeEnabled && /* @__PURE__ */ jsx90(ExitViewModeButton, { actionManager })
     ] });
-    const topLeftUI = /* @__PURE__ */ jsxs50("div", { className: "excalidraw-ui-top-left", children: [
+    const topLeftUI = /* @__PURE__ */ jsxs51("div", { className: "excalidraw-ui-top-left", children: [
       renderTopLeftUI?.(true, appState),
-      /* @__PURE__ */ jsx89(MainMenuTunnel.Out, {})
+      /* @__PURE__ */ jsx90(MainMenuTunnel.Out, {})
     ] });
-    return /* @__PURE__ */ jsxs50(
+    return /* @__PURE__ */ jsxs51(
       "div",
       {
         className: "App-toolbar-content",
@@ -24639,7 +25050,7 @@ var MobileMenu = ({
     );
   };
   const renderToolbar = () => {
-    return /* @__PURE__ */ jsx89(
+    return /* @__PURE__ */ jsx90(
       MobileToolBar,
       {
         app,
@@ -24648,10 +25059,10 @@ var MobileMenu = ({
       }
     );
   };
-  return /* @__PURE__ */ jsxs50(Fragment12, { children: [
+  return /* @__PURE__ */ jsxs51(Fragment13, { children: [
     renderSidebars(),
-    /* @__PURE__ */ jsx89("div", { className: "App-welcome-screen", children: renderWelcomeScreen && /* @__PURE__ */ jsx89(WelcomeScreenCenterTunnel.Out, {}) }),
-    !appState.viewModeEnabled && /* @__PURE__ */ jsxs50(
+    /* @__PURE__ */ jsx90("div", { className: "App-welcome-screen", children: renderWelcomeScreen && /* @__PURE__ */ jsx90(WelcomeScreenCenterTunnel.Out, {}) }),
+    !appState.viewModeEnabled && /* @__PURE__ */ jsxs51(
       "div",
       {
         className: "App-bottom-bar",
@@ -24659,7 +25070,7 @@ var MobileMenu = ({
           marginBottom: SCROLLBAR_WIDTH + SCROLLBAR_MARGIN
         },
         children: [
-          /* @__PURE__ */ jsx89(
+          /* @__PURE__ */ jsx90(
             MobileShapeActions,
             {
               appState,
@@ -24669,9 +25080,9 @@ var MobileMenu = ({
               setAppState
             }
           ),
-          /* @__PURE__ */ jsxs50(Island, { className: "App-toolbar", children: [
+          /* @__PURE__ */ jsxs51(Island, { className: "App-toolbar", children: [
             !appState.viewModeEnabled && appState.openDialog?.name !== "elementLinkSelector" && renderToolbar(),
-            appState.scrolledOutside && !appState.openMenu && !appState.openSidebar && /* @__PURE__ */ jsx89(
+            appState.scrolledOutside && !appState.openMenu && !appState.openSidebar && /* @__PURE__ */ jsx90(
               "button",
               {
                 type: "button",
@@ -24688,17 +25099,17 @@ var MobileMenu = ({
         ]
       }
     ),
-    /* @__PURE__ */ jsx89(FixedSideContainer, { side: "top", className: "App-top-bar", children: renderAppTopBar() })
+    /* @__PURE__ */ jsx90(FixedSideContainer, { side: "top", className: "App-top-bar", children: renderAppTopBar() })
   ] });
 };
 
 // components/PasteChartDialog.tsx
 import oc2 from "open-color";
-import React32, { useLayoutEffect as useLayoutEffect5, useRef as useRef26, useState as useState28 } from "react";
-import { jsx as jsx90, jsxs as jsxs51 } from "react/jsx-runtime";
+import React33, { useLayoutEffect as useLayoutEffect5, useRef as useRef27, useState as useState29 } from "react";
+import { jsx as jsx91, jsxs as jsxs52 } from "react/jsx-runtime";
 var ChartPreviewBtn = (props) => {
-  const previewRef = useRef26(null);
-  const [chartElements, setChartElements] = useState28(
+  const previewRef = useRef27(null);
+  const [chartElements, setChartElements] = useState29(
     null
   );
   useLayoutEffect5(() => {
@@ -24738,7 +25149,7 @@ var ChartPreviewBtn = (props) => {
       previewNode.replaceChildren();
     };
   }, [props.spreadsheet, props.chartType, props.selected]);
-  return /* @__PURE__ */ jsx90(
+  return /* @__PURE__ */ jsx91(
     "button",
     {
       type: "button",
@@ -24748,7 +25159,7 @@ var ChartPreviewBtn = (props) => {
           props.onClick(props.chartType, chartElements);
         }
       },
-      children: /* @__PURE__ */ jsx90("div", { ref: previewRef })
+      children: /* @__PURE__ */ jsx91("div", { ref: previewRef })
     }
   );
 };
@@ -24758,7 +25169,7 @@ var PasteChartDialog = ({
   onClose
 }) => {
   const { onInsertElements } = useApp();
-  const handleClose = React32.useCallback(() => {
+  const handleClose = React33.useCallback(() => {
     if (onClose) {
       onClose();
     }
@@ -24774,7 +25185,7 @@ var PasteChartDialog = ({
       }
     });
   };
-  return /* @__PURE__ */ jsx90(
+  return /* @__PURE__ */ jsx91(
     Dialog,
     {
       size: "small",
@@ -24782,8 +25193,8 @@ var PasteChartDialog = ({
       title: t("labels.pasteCharts"),
       className: "PasteChartDialog",
       autofocus: false,
-      children: /* @__PURE__ */ jsxs51("div", { className: "container", children: [
-        /* @__PURE__ */ jsx90(
+      children: /* @__PURE__ */ jsxs52("div", { className: "container", children: [
+        /* @__PURE__ */ jsx91(
           ChartPreviewBtn,
           {
             chartType: "bar",
@@ -24792,7 +25203,7 @@ var PasteChartDialog = ({
             onClick: handleChartClick
           }
         ),
-        /* @__PURE__ */ jsx90(
+        /* @__PURE__ */ jsx91(
           ChartPreviewBtn,
           {
             chartType: "line",
@@ -24807,11 +25218,11 @@ var PasteChartDialog = ({
 };
 
 // components/Section.tsx
-import { Fragment as Fragment13, jsx as jsx91, jsxs as jsxs52 } from "react/jsx-runtime";
+import { Fragment as Fragment14, jsx as jsx92, jsxs as jsxs53 } from "react/jsx-runtime";
 var Section = ({ heading, children, ...props }) => {
   const { id } = useExcalidrawContainer();
-  const header = /* @__PURE__ */ jsx91("h2", { className: "visually-hidden", id: `${id}-${heading}-title`, children: t(`headings.${heading}`) });
-  return /* @__PURE__ */ jsx91("section", { ...props, "aria-labelledby": `${id}-${heading}-title`, children: typeof children === "function" ? children(header) : /* @__PURE__ */ jsxs52(Fragment13, { children: [
+  const header = /* @__PURE__ */ jsx92("h2", { className: "visually-hidden", id: `${id}-${heading}-title`, children: t(`headings.${heading}`) });
+  return /* @__PURE__ */ jsx92("section", { ...props, "aria-labelledby": `${id}-${heading}-title`, children: typeof children === "function" ? children(header) : /* @__PURE__ */ jsxs53(Fragment14, { children: [
     header,
     children
   ] }) });
@@ -24820,16 +25231,16 @@ var Section = ({ heading, children, ...props }) => {
 // components/UserList.tsx
 import * as Popover9 from "@radix-ui/react-popover";
 import clsx44 from "clsx";
-import React33, { useLayoutEffect as useLayoutEffect6 } from "react";
+import React34, { useLayoutEffect as useLayoutEffect6 } from "react";
 import { supportsResizeObserver, isShallowEqual as isShallowEqual5 } from "@excalidraw/common";
-import { Fragment as Fragment14, jsx as jsx92, jsxs as jsxs53 } from "react/jsx-runtime";
+import { Fragment as Fragment15, jsx as jsx93, jsxs as jsxs54 } from "react/jsx-runtime";
 var DEFAULT_MAX_AVATARS = 4;
 var SHOW_COLLABORATORS_FILTER_AT = 8;
 var ConditionalTooltipWrapper = ({
   shouldWrap,
   children,
   username
-}) => shouldWrap ? /* @__PURE__ */ jsx92(Tooltip, { label: username || "Unknown user", children }) : /* @__PURE__ */ jsx92(Fragment14, { children });
+}) => shouldWrap ? /* @__PURE__ */ jsx93(Tooltip, { label: username || "Unknown user", children }) : /* @__PURE__ */ jsx93(Fragment15, { children });
 var renderCollaborator = ({
   actionManager,
   collaborator,
@@ -24845,7 +25256,7 @@ var renderCollaborator = ({
     isBeingFollowed
   };
   const avatarJSX = actionManager.renderAction("goToCollaborator", data);
-  return /* @__PURE__ */ jsx92(
+  return /* @__PURE__ */ jsx93(
     ConditionalTooltipWrapper,
     {
       username: collaborator.username,
@@ -24864,7 +25275,7 @@ var collaboratorComparatorKeys = [
   "isSpeaking",
   "isMuted"
 ];
-var UserList = React33.memo(
+var UserList = React34.memo(
   ({ className, mobile, collaborators, userToFollow }) => {
     const actionManager = useExcalidrawActionManager();
     const uniqueCollaboratorsMap = /* @__PURE__ */ new Map();
@@ -24879,11 +25290,11 @@ var UserList = React33.memo(
     const uniqueCollaboratorsArray = Array.from(
       uniqueCollaboratorsMap.values()
     ).filter((collaborator) => collaborator.username?.trim());
-    const [searchTerm, setSearchTerm] = React33.useState("");
+    const [searchTerm, setSearchTerm] = React34.useState("");
     const filteredCollaborators = uniqueCollaboratorsArray.filter(
       (collaborator) => collaborator.username?.toLowerCase().includes(searchTerm)
     );
-    const userListWrapper = React33.useRef(null);
+    const userListWrapper = React34.useRef(null);
     useLayoutEffect6(() => {
       if (userListWrapper.current) {
         const updateMaxAvatars = (width) => {
@@ -24906,7 +25317,7 @@ var UserList = React33.memo(
         };
       }
     }, []);
-    const [maxAvatars, setMaxAvatars] = React33.useState(DEFAULT_MAX_AVATARS);
+    const [maxAvatars, setMaxAvatars] = React34.useState(DEFAULT_MAX_AVATARS);
     const firstNCollaborators = uniqueCollaboratorsArray.slice(
       0,
       maxAvatars - 1
@@ -24920,7 +25331,7 @@ var UserList = React33.memo(
         isBeingFollowed: collaborator.socketId === userToFollow
       })
     );
-    return mobile ? /* @__PURE__ */ jsx92("div", { className: clsx44("UserList UserList_mobile", className), children: uniqueCollaboratorsArray.map(
+    return mobile ? /* @__PURE__ */ jsx93("div", { className: clsx44("UserList UserList_mobile", className), children: uniqueCollaboratorsArray.map(
       (collaborator) => renderCollaborator({
         actionManager,
         collaborator,
@@ -24928,19 +25339,19 @@ var UserList = React33.memo(
         shouldWrapWithTooltip: true,
         isBeingFollowed: collaborator.socketId === userToFollow
       })
-    ) }) : /* @__PURE__ */ jsx92("div", { className: "UserList__wrapper", ref: userListWrapper, children: /* @__PURE__ */ jsxs53(
+    ) }) : /* @__PURE__ */ jsx93("div", { className: "UserList__wrapper", ref: userListWrapper, children: /* @__PURE__ */ jsxs54(
       "div",
       {
         className: clsx44("UserList", className),
         style: { [`--max-avatars`]: maxAvatars },
         children: [
           firstNAvatarsJSX,
-          uniqueCollaboratorsArray.length > maxAvatars - 1 && /* @__PURE__ */ jsxs53(Popover9.Root, { children: [
-            /* @__PURE__ */ jsxs53(Popover9.Trigger, { className: "UserList__more", children: [
+          uniqueCollaboratorsArray.length > maxAvatars - 1 && /* @__PURE__ */ jsxs54(Popover9.Root, { children: [
+            /* @__PURE__ */ jsxs54(Popover9.Trigger, { className: "UserList__more", children: [
               "+",
               uniqueCollaboratorsArray.length - maxAvatars + 1
             ] }),
-            /* @__PURE__ */ jsx92(
+            /* @__PURE__ */ jsx93(
               Popover9.Content,
               {
                 style: {
@@ -24950,21 +25361,21 @@ var UserList = React33.memo(
                 },
                 align: "end",
                 sideOffset: 10,
-                children: /* @__PURE__ */ jsxs53(Island, { padding: 2, children: [
-                  uniqueCollaboratorsArray.length >= SHOW_COLLABORATORS_FILTER_AT && /* @__PURE__ */ jsx92(
+                children: /* @__PURE__ */ jsxs54(Island, { padding: 2, children: [
+                  uniqueCollaboratorsArray.length >= SHOW_COLLABORATORS_FILTER_AT && /* @__PURE__ */ jsx93(
                     QuickSearch,
                     {
                       placeholder: t("quickSearch.placeholder"),
                       onChange: setSearchTerm
                     }
                   ),
-                  /* @__PURE__ */ jsx92(
+                  /* @__PURE__ */ jsx93(
                     ScrollableList,
                     {
                       className: "dropdown-menu UserList__collaborators",
                       placeholder: t("userList.empty"),
                       children: filteredCollaborators.length > 0 ? [
-                        /* @__PURE__ */ jsx92("div", { className: "hint", children: t("userList.hint.text") }),
+                        /* @__PURE__ */ jsx93("div", { className: "hint", children: t("userList.hint.text") }),
                         filteredCollaborators.map(
                           (collaborator) => renderCollaborator({
                             actionManager,
@@ -24977,7 +25388,7 @@ var UserList = React33.memo(
                       ] : []
                     }
                   ),
-                  /* @__PURE__ */ jsx92(
+                  /* @__PURE__ */ jsx93(
                     Popover9.Arrow,
                     {
                       width: 20,
@@ -25021,8 +25432,8 @@ var UserList = React33.memo(
 import clsx45 from "clsx";
 
 // components/HelpButton.tsx
-import { jsx as jsx93 } from "react/jsx-runtime";
-var HelpButton = (props) => /* @__PURE__ */ jsx93(
+import { jsx as jsx94 } from "react/jsx-runtime";
+var HelpButton = (props) => /* @__PURE__ */ jsx94(
   "button",
   {
     className: "help-icon",
@@ -25035,7 +25446,7 @@ var HelpButton = (props) => /* @__PURE__ */ jsx93(
 );
 
 // components/footer/Footer.tsx
-import { jsx as jsx94, jsxs as jsxs54 } from "react/jsx-runtime";
+import { jsx as jsx95, jsxs as jsxs55 } from "react/jsx-runtime";
 var Footer = ({
   appState,
   actionManager,
@@ -25043,27 +25454,27 @@ var Footer = ({
   renderWelcomeScreen
 }) => {
   const { FooterCenterTunnel, WelcomeScreenHelpHintTunnel } = useTunnels();
-  return /* @__PURE__ */ jsxs54(
+  return /* @__PURE__ */ jsxs55(
     "footer",
     {
       role: "contentinfo",
       className: "layer-ui__wrapper__footer App-menu App-menu_bottom",
       children: [
-        /* @__PURE__ */ jsx94(
+        /* @__PURE__ */ jsx95(
           "div",
           {
             className: clsx45("layer-ui__wrapper__footer-left zen-mode-transition", {
               "layer-ui__wrapper__footer-left--transition-left": appState.zenModeEnabled
             }),
-            children: /* @__PURE__ */ jsx94(Stack_default.Col, { gap: 2, children: /* @__PURE__ */ jsxs54(Section, { heading: "canvasActions", children: [
-              /* @__PURE__ */ jsx94(
+            children: /* @__PURE__ */ jsx95(Stack_default.Col, { gap: 2, children: /* @__PURE__ */ jsxs55(Section, { heading: "canvasActions", children: [
+              /* @__PURE__ */ jsx95(
                 ZoomActions,
                 {
                   renderAction: actionManager.renderAction,
                   zoom: appState.zoom
                 }
               ),
-              !appState.viewModeEnabled && /* @__PURE__ */ jsx94(
+              !appState.viewModeEnabled && /* @__PURE__ */ jsx95(
                 UndoRedoActions,
                 {
                   renderAction: actionManager.renderAction,
@@ -25075,16 +25486,16 @@ var Footer = ({
             ] }) })
           }
         ),
-        /* @__PURE__ */ jsx94(FooterCenterTunnel.Out, {}),
-        /* @__PURE__ */ jsx94(
+        /* @__PURE__ */ jsx95(FooterCenterTunnel.Out, {}),
+        /* @__PURE__ */ jsx95(
           "div",
           {
             className: clsx45("layer-ui__wrapper__footer-right zen-mode-transition", {
               "transition-right": appState.zenModeEnabled
             }),
-            children: /* @__PURE__ */ jsxs54("div", { style: { position: "relative" }, children: [
-              renderWelcomeScreen && /* @__PURE__ */ jsx94(WelcomeScreenHelpHintTunnel.Out, {}),
-              /* @__PURE__ */ jsx94(
+            children: /* @__PURE__ */ jsxs55("div", { style: { position: "relative" }, children: [
+              renderWelcomeScreen && /* @__PURE__ */ jsx95(WelcomeScreenHelpHintTunnel.Out, {}),
+              /* @__PURE__ */ jsx95(
                 HelpButton,
                 {
                   onClick: () => actionManager.executeAction(actionShortcuts)
@@ -25093,7 +25504,7 @@ var Footer = ({
             ] })
           }
         ),
-        /* @__PURE__ */ jsx94(
+        /* @__PURE__ */ jsx95(
           ExitZenModeButton,
           {
             actionManager,
@@ -25112,8 +25523,8 @@ import clsx48 from "clsx";
 import {
   useEffect as useEffect33,
   useLayoutEffect as useLayoutEffect7,
-  useRef as useRef27,
-  useState as useState29,
+  useRef as useRef28,
+  useState as useState30,
   forwardRef as forwardRef4,
   useImperativeHandle as useImperativeHandle3,
   useCallback as useCallback12
@@ -25131,11 +25542,11 @@ import clsx46 from "clsx";
 import { useContext as useContext2 } from "react";
 
 // components/Sidebar/common.ts
-import React34 from "react";
-var SidebarPropsContext = React34.createContext({});
+import React35 from "react";
+var SidebarPropsContext = React35.createContext({});
 
 // components/Sidebar/SidebarHeader.tsx
-import { jsx as jsx95, jsxs as jsxs55 } from "react/jsx-runtime";
+import { jsx as jsx96, jsxs as jsxs56 } from "react/jsx-runtime";
 var SidebarHeader = ({
   children,
   className
@@ -25143,15 +25554,15 @@ var SidebarHeader = ({
   const editorInterface = useEditorInterface();
   const props = useContext2(SidebarPropsContext);
   const renderDockButton = !!(editorInterface.canFitSidebar && props.shouldRenderDockButton);
-  return /* @__PURE__ */ jsxs55(
+  return /* @__PURE__ */ jsxs56(
     "div",
     {
       className: clsx46("sidebar__header", className),
       "data-testid": "sidebar-header",
       children: [
         children,
-        /* @__PURE__ */ jsxs55("div", { className: "sidebar__header__buttons", children: [
-          renderDockButton && /* @__PURE__ */ jsx95(Tooltip, { label: t("labels.sidebarLock"), children: /* @__PURE__ */ jsx95(
+        /* @__PURE__ */ jsxs56("div", { className: "sidebar__header__buttons", children: [
+          renderDockButton && /* @__PURE__ */ jsx96(Tooltip, { label: t("labels.sidebarLock"), children: /* @__PURE__ */ jsx96(
             Button,
             {
               onSelect: () => props.onDock?.(!props.docked),
@@ -25162,7 +25573,7 @@ var SidebarHeader = ({
               children: PinIcon
             }
           ) }),
-          /* @__PURE__ */ jsx95(
+          /* @__PURE__ */ jsx96(
             Button,
             {
               "data-testid": "sidebar-close",
@@ -25181,14 +25592,14 @@ SidebarHeader.displayName = "SidebarHeader";
 
 // components/Sidebar/SidebarTabTrigger.tsx
 import * as RadixTabs from "@radix-ui/react-tabs";
-import { jsx as jsx96 } from "react/jsx-runtime";
+import { jsx as jsx97 } from "react/jsx-runtime";
 var SidebarTabTrigger = ({
   children,
   tab,
   onSelect,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx96(RadixTabs.Trigger, { value: tab, asChild: true, onSelect, children: /* @__PURE__ */ jsx96(
+  return /* @__PURE__ */ jsx97(RadixTabs.Trigger, { value: tab, asChild: true, onSelect, children: /* @__PURE__ */ jsx97(
     "button",
     {
       type: "button",
@@ -25202,18 +25613,18 @@ SidebarTabTrigger.displayName = "SidebarTabTrigger";
 
 // components/Sidebar/SidebarTabTriggers.tsx
 import * as RadixTabs2 from "@radix-ui/react-tabs";
-import { jsx as jsx97 } from "react/jsx-runtime";
+import { jsx as jsx98 } from "react/jsx-runtime";
 var SidebarTabTriggers = ({
   children,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx97(RadixTabs2.List, { className: "sidebar-triggers", ...rest, children });
+  return /* @__PURE__ */ jsx98(RadixTabs2.List, { className: "sidebar-triggers", ...rest, children });
 };
 SidebarTabTriggers.displayName = "SidebarTabTriggers";
 
 // components/Sidebar/SidebarTrigger.tsx
 import clsx47 from "clsx";
-import { jsx as jsx98, jsxs as jsxs56 } from "react/jsx-runtime";
+import { jsx as jsx99, jsxs as jsxs57 } from "react/jsx-runtime";
 var SidebarTrigger = ({
   name,
   tab,
@@ -25226,8 +25637,8 @@ var SidebarTrigger = ({
 }) => {
   const setAppState = useExcalidrawSetAppState();
   const appState = useUIAppState();
-  return /* @__PURE__ */ jsxs56("label", { title, className: "sidebar-trigger__label-element", children: [
-    /* @__PURE__ */ jsx98(
+  return /* @__PURE__ */ jsxs57("label", { title, className: "sidebar-trigger__label-element", children: [
+    /* @__PURE__ */ jsx99(
       "input",
       {
         className: "ToolIcon_type_checkbox",
@@ -25247,9 +25658,9 @@ var SidebarTrigger = ({
         "aria-keyshortcuts": "0"
       }
     ),
-    /* @__PURE__ */ jsxs56("div", { className: clsx47("sidebar-trigger", className), style, children: [
-      icon && /* @__PURE__ */ jsx98("div", { children: icon }),
-      children && /* @__PURE__ */ jsx98("div", { className: "sidebar-trigger__label", children })
+    /* @__PURE__ */ jsxs57("div", { className: clsx47("sidebar-trigger", className), style, children: [
+      icon && /* @__PURE__ */ jsx99("div", { children: icon }),
+      children && /* @__PURE__ */ jsx99("div", { className: "sidebar-trigger__label", children })
     ] })
   ] });
 };
@@ -25257,7 +25668,7 @@ SidebarTrigger.displayName = "SidebarTrigger";
 
 // components/Sidebar/SidebarTabs.tsx
 import * as RadixTabs3 from "@radix-ui/react-tabs";
-import { jsx as jsx99 } from "react/jsx-runtime";
+import { jsx as jsx100 } from "react/jsx-runtime";
 var SidebarTabs = ({
   children,
   ...rest
@@ -25268,7 +25679,7 @@ var SidebarTabs = ({
     return null;
   }
   const { name } = appState.openSidebar;
-  return /* @__PURE__ */ jsx99(
+  return /* @__PURE__ */ jsx100(
     RadixTabs3.Root,
     {
       className: "sidebar-tabs-root",
@@ -25286,18 +25697,18 @@ SidebarTabs.displayName = "SidebarTabs";
 
 // components/Sidebar/SidebarTab.tsx
 import * as RadixTabs4 from "@radix-ui/react-tabs";
-import { jsx as jsx100 } from "react/jsx-runtime";
+import { jsx as jsx101 } from "react/jsx-runtime";
 var SidebarTab = ({
   tab,
   children,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx100(RadixTabs4.Content, { ...rest, value: tab, "data-testid": tab, children });
+  return /* @__PURE__ */ jsx101(RadixTabs4.Content, { ...rest, value: tab, "data-testid": tab, children });
 };
 SidebarTab.displayName = "SidebarTab";
 
 // components/Sidebar/Sidebar.tsx
-import { jsx as jsx101 } from "react/jsx-runtime";
+import { jsx as jsx102 } from "react/jsx-runtime";
 import { createElement } from "react";
 var isSidebarDockedAtom = atom(false);
 var SidebarInner = forwardRef4(
@@ -25322,7 +25733,7 @@ var SidebarInner = forwardRef4(
         setIsSidebarDockedAtom(false);
       };
     }, [setIsSidebarDockedAtom, docked]);
-    const headerPropsRef = useRef27(
+    const headerPropsRef = useRef28(
       {}
     );
     headerPropsRef.current.onCloseRequest = () => {
@@ -25334,7 +25745,7 @@ var SidebarInner = forwardRef4(
       // explicit prop to rerender on update
       shouldRenderDockButton: !!onDock && docked != null
     });
-    const islandRef = useRef27(null);
+    const islandRef = useRef28(null);
     useImperativeHandle3(ref, () => {
       return islandRef.current;
     });
@@ -25371,7 +25782,7 @@ var SidebarInner = forwardRef4(
         document.removeEventListener(EVENT11.KEYDOWN, handleKeyDown);
       };
     }, [closeLibrary, docked, editorInterface.canFitSidebar]);
-    return /* @__PURE__ */ jsx101(
+    return /* @__PURE__ */ jsx102(
       Island,
       {
         ...rest,
@@ -25381,7 +25792,7 @@ var SidebarInner = forwardRef4(
           className
         ),
         ref: islandRef,
-        children: /* @__PURE__ */ jsx101(SidebarPropsContext.Provider, { value: headerPropsRef.current, children })
+        children: /* @__PURE__ */ jsx102(SidebarPropsContext.Provider, { value: headerPropsRef.current, children })
       }
     );
   }
@@ -25391,7 +25802,7 @@ var Sidebar = Object.assign(
   forwardRef4((props, ref) => {
     const appState = useUIAppState();
     const { onStateChange } = props;
-    const refPrevOpenSidebar = useRef27(appState.openSidebar);
+    const refPrevOpenSidebar = useRef28(appState.openSidebar);
     useEffect33(() => {
       if (
         // closing sidebar
@@ -25405,7 +25816,7 @@ var Sidebar = Object.assign(
       }
       refPrevOpenSidebar.current = appState.openSidebar;
     }, [appState.openSidebar, onStateChange, props.name]);
-    const [mounted, setMounted] = useState29(false);
+    const [mounted, setMounted] = useState30(false);
     useLayoutEffect7(() => {
       setMounted(true);
       return () => setMounted(false);
@@ -25431,8 +25842,8 @@ Sidebar.displayName = "Sidebar";
 import { composeEventHandlers as composeEventHandlers3 } from "@excalidraw/common";
 
 // components/hoc/withInternalFallback.tsx
-import { useLayoutEffect as useLayoutEffect8, useRef as useRef28 } from "react";
-import { jsx as jsx102 } from "react/jsx-runtime";
+import { useLayoutEffect as useLayoutEffect8, useRef as useRef29 } from "react";
+import { jsx as jsx103 } from "react/jsx-runtime";
 var withInternalFallback = (componentName, Component) => {
   const renderAtom = atom(0);
   const WrapperComponent = (props) => {
@@ -25440,7 +25851,7 @@ var withInternalFallback = (componentName, Component) => {
       tunnelsJotai: { useAtom: useAtom2 }
     } = useTunnels();
     const [, setCounter] = useAtom2(renderAtom);
-    const metaRef = useRef28({
+    const metaRef = useRef29({
       // flag set on initial render to tell the fallback component to skip the
       // render until mount counter are initialized. This is because the counter
       // is initialized in an effect, and thus we could end rendering both
@@ -25477,7 +25888,7 @@ var withInternalFallback = (componentName, Component) => {
     ) {
       return null;
     }
-    return /* @__PURE__ */ jsx102(Component, { ...props });
+    return /* @__PURE__ */ jsx103(Component, { ...props });
   };
   WrapperComponent.displayName = componentName;
   return WrapperComponent;
@@ -25528,14 +25939,14 @@ async function openConfirmModal({
 
 // components/RadioGroup.tsx
 import clsx49 from "clsx";
-import { jsx as jsx103, jsxs as jsxs57 } from "react/jsx-runtime";
+import { jsx as jsx104, jsxs as jsxs58 } from "react/jsx-runtime";
 var RadioGroup = function({
   onChange,
   value,
   choices,
   name
 }) {
-  return /* @__PURE__ */ jsx103("div", { className: "RadioGroup", children: choices.map((choice) => /* @__PURE__ */ jsxs57(
+  return /* @__PURE__ */ jsx104("div", { className: "RadioGroup", children: choices.map((choice) => /* @__PURE__ */ jsxs58(
     "div",
     {
       className: clsx49("RadioGroup__choice", {
@@ -25543,7 +25954,7 @@ var RadioGroup = function({
       }),
       title: choice.ariaLabel,
       children: [
-        /* @__PURE__ */ jsx103(
+        /* @__PURE__ */ jsx104(
           "input",
           {
             name,
@@ -25561,7 +25972,7 @@ var RadioGroup = function({
 };
 
 // components/dropdownMenu/DropdownMenuItemContentRadio.tsx
-import { Fragment as Fragment15, jsx as jsx104, jsxs as jsxs58 } from "react/jsx-runtime";
+import { Fragment as Fragment16, jsx as jsx105, jsxs as jsxs59 } from "react/jsx-runtime";
 var DropdownMenuItemContentRadio = ({
   value,
   shortcut,
@@ -25571,10 +25982,10 @@ var DropdownMenuItemContentRadio = ({
   name
 }) => {
   const editorInterface = useEditorInterface();
-  return /* @__PURE__ */ jsxs58(Fragment15, { children: [
-    /* @__PURE__ */ jsxs58("div", { className: "dropdown-menu-item-base dropdown-menu-item-bare", children: [
-      /* @__PURE__ */ jsx104("label", { className: "dropdown-menu-item__text", htmlFor: name, children }),
-      /* @__PURE__ */ jsx104(
+  return /* @__PURE__ */ jsxs59(Fragment16, { children: [
+    /* @__PURE__ */ jsxs59("div", { className: "dropdown-menu-item-base dropdown-menu-item-bare", children: [
+      /* @__PURE__ */ jsx105("label", { className: "dropdown-menu-item__text", htmlFor: name, children }),
+      /* @__PURE__ */ jsx105(
         RadioGroup,
         {
           name,
@@ -25584,14 +25995,14 @@ var DropdownMenuItemContentRadio = ({
         }
       )
     ] }),
-    shortcut && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx104("div", { className: "dropdown-menu-item__shortcut dropdown-menu-item__shortcut--orphaned", children: shortcut })
+    shortcut && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx105("div", { className: "dropdown-menu-item__shortcut dropdown-menu-item__shortcut--orphaned", children: shortcut })
   ] });
 };
 DropdownMenuItemContentRadio.displayName = "DropdownMenuItemContentRadio";
 var DropdownMenuItemContentRadio_default = DropdownMenuItemContentRadio;
 
 // components/main-menu/DefaultItems.tsx
-import { Fragment as Fragment16, jsx as jsx105, jsxs as jsxs59 } from "react/jsx-runtime";
+import { Fragment as Fragment17, jsx as jsx106, jsxs as jsxs60 } from "react/jsx-runtime";
 var LoadScene = () => {
   const { t: t2 } = useI18n();
   const actionManager = useExcalidrawActionManager();
@@ -25604,19 +26015,19 @@ var LoadScene = () => {
       title: t2("overwriteConfirm.modal.loadFromFile.title"),
       actionLabel: t2("overwriteConfirm.modal.loadFromFile.button"),
       color: "warning",
-      description: /* @__PURE__ */ jsx105(
+      description: /* @__PURE__ */ jsx106(
         Trans_default,
         {
           i18nKey: "overwriteConfirm.modal.loadFromFile.description",
-          bold: (text) => /* @__PURE__ */ jsx105("strong", { children: text }),
-          br: () => /* @__PURE__ */ jsx105("br", {})
+          bold: (text) => /* @__PURE__ */ jsx106("strong", { children: text }),
+          br: () => /* @__PURE__ */ jsx106("br", {})
         }
       )
     })) {
       actionManager.executeAction(actionLoadScene);
     }
   };
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: LoadIcon,
@@ -25635,7 +26046,7 @@ var SaveToActiveFile = () => {
   if (!actionManager.isActionEnabled(actionSaveToActiveFile)) {
     return null;
   }
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       shortcut: getShortcutFromShortcutName("saveScene"),
@@ -25651,7 +26062,7 @@ SaveToActiveFile.displayName = "SaveToActiveFile";
 var SaveAsImage = () => {
   const setAppState = useExcalidrawSetAppState();
   const { t: t2 } = useI18n();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: ExportImageIcon,
@@ -25667,7 +26078,7 @@ SaveAsImage.displayName = "SaveAsImage";
 var CommandPalette2 = (opts) => {
   const setAppState = useExcalidrawSetAppState();
   const { t: t2 } = useI18n();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: boltIcon,
@@ -25687,7 +26098,7 @@ CommandPalette2.displayName = "CommandPalette";
 var SearchMenu = (opts) => {
   const { t: t2 } = useI18n();
   const actionManager = useExcalidrawActionManager();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: searchIcon,
@@ -25706,7 +26117,7 @@ SearchMenu.displayName = "SearchMenu";
 var Help = () => {
   const { t: t2 } = useI18n();
   const actionManager = useExcalidrawActionManager();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       "data-testid": "help-menu-item",
@@ -25726,7 +26137,7 @@ var ClearCanvas = () => {
   if (!actionManager.isActionEnabled(actionClearCanvas)) {
     return null;
   }
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: TrashIcon,
@@ -25747,7 +26158,7 @@ var ToggleTheme = (props) => {
     return null;
   }
   if (props?.allowSystemTheme) {
-    return /* @__PURE__ */ jsx105(
+    return /* @__PURE__ */ jsx106(
       DropdownMenuItemContentRadio_default,
       {
         name: "theme",
@@ -25774,7 +26185,7 @@ var ToggleTheme = (props) => {
       }
     );
   }
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       onSelect: (event) => {
@@ -25804,8 +26215,8 @@ var ChangeCanvasBackground = () => {
   if (appState.viewModeEnabled || !appProps.UIOptions.canvasActions.changeViewBackgroundColor) {
     return null;
   }
-  return /* @__PURE__ */ jsxs59("div", { style: { marginTop: "0.5rem" }, children: [
-    /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsxs60("div", { style: { marginTop: "0.5rem" }, children: [
+    /* @__PURE__ */ jsx106(
       "div",
       {
         "data-testid": "canvas-background-label",
@@ -25813,14 +26224,14 @@ var ChangeCanvasBackground = () => {
         children: t2("labels.canvasBackground")
       }
     ),
-    /* @__PURE__ */ jsx105("div", { style: { padding: "0 0.625rem" }, children: actionManager.renderAction("changeViewBackgroundColor") })
+    /* @__PURE__ */ jsx106("div", { style: { padding: "0 0.625rem" }, children: actionManager.renderAction("changeViewBackgroundColor") })
   ] });
 };
 ChangeCanvasBackground.displayName = "ChangeCanvasBackground";
 var Export = () => {
   const { t: t2 } = useI18n();
   const setAppState = useExcalidrawSetAppState();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       icon: ExportIcon,
@@ -25836,8 +26247,8 @@ var Export = () => {
 Export.displayName = "Export";
 var Socials = () => {
   const { t: t2 } = useI18n();
-  return /* @__PURE__ */ jsxs59(Fragment16, { children: [
-    /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsxs60(Fragment17, { children: [
+    /* @__PURE__ */ jsx106(
       DropdownMenuItemLink_default,
       {
         icon: GithubIcon,
@@ -25846,7 +26257,7 @@ var Socials = () => {
         children: "GitHub"
       }
     ),
-    /* @__PURE__ */ jsx105(
+    /* @__PURE__ */ jsx106(
       DropdownMenuItemLink_default,
       {
         icon: XBrandIcon,
@@ -25855,7 +26266,7 @@ var Socials = () => {
         children: t2("labels.followUs")
       }
     ),
-    /* @__PURE__ */ jsx105(
+    /* @__PURE__ */ jsx106(
       DropdownMenuItemLink_default,
       {
         icon: DiscordIcon,
@@ -25872,7 +26283,7 @@ var LiveCollaborationTrigger = ({
   isCollaborating
 }) => {
   const { t: t2 } = useI18n();
-  return /* @__PURE__ */ jsx105(
+  return /* @__PURE__ */ jsx106(
     DropdownMenuItem_default,
     {
       "data-testid": "collab-button",
@@ -25888,7 +26299,7 @@ var LiveCollaborationTrigger = ({
 LiveCollaborationTrigger.displayName = "LiveCollaborationTrigger";
 
 // components/main-menu/MainMenu.tsx
-import { jsx as jsx106, jsxs as jsxs60 } from "react/jsx-runtime";
+import { jsx as jsx107, jsxs as jsxs61 } from "react/jsx-runtime";
 var MainMenu = Object.assign(
   withInternalFallback(
     "MainMenu",
@@ -25900,8 +26311,8 @@ var MainMenu = Object.assign(
       const editorInterface = useEditorInterface();
       const appState = useUIAppState();
       const setAppState = useExcalidrawSetAppState();
-      return /* @__PURE__ */ jsx106(MainMenuTunnel.In, { children: /* @__PURE__ */ jsxs60(DropdownMenu_default, { open: appState.openMenu === "canvas", children: [
-        /* @__PURE__ */ jsx106(
+      return /* @__PURE__ */ jsx107(MainMenuTunnel.In, { children: /* @__PURE__ */ jsxs61(DropdownMenu_default, { open: appState.openMenu === "canvas", children: [
+        /* @__PURE__ */ jsx107(
           DropdownMenu_default.Trigger,
           {
             onToggle: () => {
@@ -25916,7 +26327,7 @@ var MainMenu = Object.assign(
             children: HamburgerMenuIcon
           }
         ),
-        /* @__PURE__ */ jsxs60(
+        /* @__PURE__ */ jsxs61(
           DropdownMenu_default.Content,
           {
             onClickOutside: () => setAppState({ openMenu: null }),
@@ -25927,9 +26338,9 @@ var MainMenu = Object.assign(
             className: editorInterface.formFactor === "phone" ? "main-menu-dropdown" : "",
             children: [
               children,
-              editorInterface.formFactor === "phone" && appState.collaborators.size > 0 && /* @__PURE__ */ jsxs60("fieldset", { className: "UserList-Wrapper", children: [
-                /* @__PURE__ */ jsx106("legend", { children: t("labels.collaborators") }),
-                /* @__PURE__ */ jsx106(
+              editorInterface.formFactor === "phone" && appState.collaborators.size > 0 && /* @__PURE__ */ jsxs61("fieldset", { className: "UserList-Wrapper", children: [
+                /* @__PURE__ */ jsx107("legend", { children: t("labels.collaborators") }),
+                /* @__PURE__ */ jsx107(
                   UserList,
                   {
                     mobile: true,
@@ -25958,9 +26369,9 @@ var MainMenu_default = MainMenu;
 
 // components/FilledButton.tsx
 import clsx51 from "clsx";
-import { forwardRef as forwardRef5, useState as useState30 } from "react";
+import { forwardRef as forwardRef5, useState as useState31 } from "react";
 import { isPromiseLike as isPromiseLike4 } from "@excalidraw/common";
-import { jsx as jsx107, jsxs as jsxs61 } from "react/jsx-runtime";
+import { jsx as jsx108, jsxs as jsxs62 } from "react/jsx-runtime";
 var FilledButton = forwardRef5(
   ({
     children,
@@ -25974,7 +26385,7 @@ var FilledButton = forwardRef5(
     className,
     status
   }, ref) => {
-    const [isLoading, setIsLoading] = useState30(false);
+    const [isLoading, setIsLoading] = useState31(false);
     const _onClick = async (event) => {
       const ret = onClick?.(event);
       if (isPromiseLike4(ret)) {
@@ -25997,7 +26408,7 @@ var FilledButton = forwardRef5(
     };
     const _status = isLoading ? "loading" : status;
     color = _status === "success" ? "success" : color;
-    return /* @__PURE__ */ jsx107(
+    return /* @__PURE__ */ jsx108(
       "button",
       {
         className: clsx51(
@@ -26014,9 +26425,9 @@ var FilledButton = forwardRef5(
         "aria-label": label,
         ref,
         disabled: _status === "loading" || _status === "success",
-        children: /* @__PURE__ */ jsxs61("div", { className: "ExcButton__contents", children: [
-          _status === "loading" ? /* @__PURE__ */ jsx107(Spinner_default, { className: "ExcButton__statusIcon" }) : _status === "success" && /* @__PURE__ */ jsx107("div", { className: "ExcButton__statusIcon", children: tablerCheckIcon }),
-          icon && /* @__PURE__ */ jsx107("div", { className: "ExcButton__icon", "aria-hidden": true, children: icon }),
+        children: /* @__PURE__ */ jsxs62("div", { className: "ExcButton__contents", children: [
+          _status === "loading" ? /* @__PURE__ */ jsx108(Spinner_default, { className: "ExcButton__statusIcon" }) : _status === "success" && /* @__PURE__ */ jsx108("div", { className: "ExcButton__statusIcon", children: tablerCheckIcon }),
+          icon && /* @__PURE__ */ jsx108("div", { className: "ExcButton__icon", "aria-hidden": true, children: icon }),
           variant !== "icon" && (children ?? label)
         ] })
       }
@@ -26025,17 +26436,17 @@ var FilledButton = forwardRef5(
 );
 
 // components/OverwriteConfirm/OverwriteConfirmActions.tsx
-import { jsx as jsx108, jsxs as jsxs62 } from "react/jsx-runtime";
+import { jsx as jsx109, jsxs as jsxs63 } from "react/jsx-runtime";
 var Action = ({
   title,
   children,
   actionLabel,
   onClick
 }) => {
-  return /* @__PURE__ */ jsxs62("div", { className: "OverwriteConfirm__Actions__Action", children: [
-    /* @__PURE__ */ jsx108("h4", { children: title }),
-    /* @__PURE__ */ jsx108("div", { className: "OverwriteConfirm__Actions__Action__content", children }),
-    /* @__PURE__ */ jsx108(
+  return /* @__PURE__ */ jsxs63("div", { className: "OverwriteConfirm__Actions__Action", children: [
+    /* @__PURE__ */ jsx109("h4", { children: title }),
+    /* @__PURE__ */ jsx109("div", { className: "OverwriteConfirm__Actions__Action__content", children }),
+    /* @__PURE__ */ jsx109(
       FilledButton,
       {
         variant: "outlined",
@@ -26052,7 +26463,7 @@ var ExportToImage = () => {
   const { t: t2 } = useI18n();
   const actionManager = useExcalidrawActionManager();
   const setAppState = useExcalidrawSetAppState();
-  return /* @__PURE__ */ jsx108(
+  return /* @__PURE__ */ jsx109(
     Action,
     {
       title: t2("overwriteConfirm.action.exportToImage.title"),
@@ -26068,7 +26479,7 @@ var ExportToImage = () => {
 var SaveToDisk = () => {
   const { t: t2 } = useI18n();
   const actionManager = useExcalidrawActionManager();
-  return /* @__PURE__ */ jsx108(
+  return /* @__PURE__ */ jsx109(
     Action,
     {
       title: t2("overwriteConfirm.action.saveToDisk.title"),
@@ -26082,7 +26493,7 @@ var SaveToDisk = () => {
 };
 var Actions = Object.assign(
   ({ children }) => {
-    return /* @__PURE__ */ jsx108("div", { className: "OverwriteConfirm__Actions", children });
+    return /* @__PURE__ */ jsx109("div", { className: "OverwriteConfirm__Actions", children });
   },
   {
     ExportToImage,
@@ -26091,7 +26502,7 @@ var Actions = Object.assign(
 );
 
 // components/OverwriteConfirm/OverwriteConfirm.tsx
-import { jsx as jsx109, jsxs as jsxs63 } from "react/jsx-runtime";
+import { jsx as jsx110, jsxs as jsxs64 } from "react/jsx-runtime";
 var OverwriteConfirmDialog = Object.assign(
   withInternalFallback(
     "OverwriteConfirmDialog",
@@ -26111,17 +26522,17 @@ var OverwriteConfirmDialog = Object.assign(
         overwriteConfirmState.onConfirm();
         setState((state) => ({ ...state, active: false }));
       };
-      return /* @__PURE__ */ jsx109(OverwriteConfirmDialogTunnel.In, { children: /* @__PURE__ */ jsx109(Dialog, { onCloseRequest: handleClose, title: false, size: 916, children: /* @__PURE__ */ jsxs63("div", { className: "OverwriteConfirm", children: [
-        /* @__PURE__ */ jsx109("h3", { children: overwriteConfirmState.title }),
-        /* @__PURE__ */ jsxs63(
+      return /* @__PURE__ */ jsx110(OverwriteConfirmDialogTunnel.In, { children: /* @__PURE__ */ jsx110(Dialog, { onCloseRequest: handleClose, title: false, size: 916, children: /* @__PURE__ */ jsxs64("div", { className: "OverwriteConfirm", children: [
+        /* @__PURE__ */ jsx110("h3", { children: overwriteConfirmState.title }),
+        /* @__PURE__ */ jsxs64(
           "div",
           {
             className: `OverwriteConfirm__Description OverwriteConfirm__Description--color-${overwriteConfirmState.color}`,
             children: [
-              /* @__PURE__ */ jsx109("div", { className: "OverwriteConfirm__Description__icon", children: alertTriangleIcon }),
-              /* @__PURE__ */ jsx109("div", { children: overwriteConfirmState.description }),
-              /* @__PURE__ */ jsx109("div", { className: "OverwriteConfirm__Description__spacer" }),
-              /* @__PURE__ */ jsx109(
+              /* @__PURE__ */ jsx110("div", { className: "OverwriteConfirm__Description__icon", children: alertTriangleIcon }),
+              /* @__PURE__ */ jsx110("div", { children: overwriteConfirmState.description }),
+              /* @__PURE__ */ jsx110("div", { className: "OverwriteConfirm__Description__spacer" }),
+              /* @__PURE__ */ jsx110(
                 FilledButton,
                 {
                   color: overwriteConfirmState.color,
@@ -26133,7 +26544,7 @@ var OverwriteConfirmDialog = Object.assign(
             ]
           }
         ),
-        /* @__PURE__ */ jsx109(Actions, { children })
+        /* @__PURE__ */ jsx110(Actions, { children })
       ] }) }) });
     }
   ),
@@ -26156,7 +26567,7 @@ import {
 import { round as round2 } from "@excalidraw/math";
 import clsx52 from "clsx";
 import debounce2 from "lodash.debounce";
-import { Fragment as Fragment17, memo as memo4, useEffect as useEffect34, useMemo as useMemo8, useRef as useRef29, useState as useState31 } from "react";
+import { Fragment as Fragment18, memo as memo4, useEffect as useEffect34, useMemo as useMemo8, useRef as useRef30, useState as useState32 } from "react";
 import {
   CLASSES as CLASSES7,
   EVENT as EVENT12,
@@ -26175,23 +26586,23 @@ import {
 import { newTextElement as newTextElement3 } from "@excalidraw/element";
 import { isTextElement as isTextElement12, isFrameLikeElement as isFrameLikeElement10 } from "@excalidraw/element";
 import { getDefaultFrameName } from "@excalidraw/element/frame";
-import { Fragment as Fragment18, jsx as jsx110, jsxs as jsxs64 } from "react/jsx-runtime";
+import { Fragment as Fragment19, jsx as jsx111, jsxs as jsxs65 } from "react/jsx-runtime";
 var searchQueryAtom = atom("");
 var searchItemInFocusAtom = atom(null);
 var SEARCH_DEBOUNCE = 350;
 var SearchMenu2 = () => {
   const app = useApp();
   const setAppState = useExcalidrawSetAppState();
-  const searchInputRef = useRef29(null);
+  const searchInputRef = useRef30(null);
   const [inputValue, setInputValue] = useAtom(searchQueryAtom);
   const searchQuery = inputValue.trim();
-  const [isSearching, setIsSearching] = useState31(false);
-  const [searchMatches, setSearchMatches] = useState31({
+  const [isSearching, setIsSearching] = useState32(false);
+  const [searchMatches, setSearchMatches] = useState32({
     nonce: null,
     items: []
   });
-  const searchedQueryRef = useRef29(null);
-  const lastSceneNonceRef = useRef29(void 0);
+  const searchedQueryRef = useRef30(null);
+  const lastSceneNonceRef = useRef30(void 0);
   const [focusIndex, setFocusIndex] = useAtom(searchItemInFocusAtom);
   const elementsMap = app.scene.getNonDeletedElementsMap();
   useEffect34(() => {
@@ -26386,8 +26797,8 @@ var SearchMenu2 = () => {
     });
   }, [setAppState, stableState, app]);
   const matchCount = `${searchMatches.items.length} ${searchMatches.items.length === 1 ? t("search.singleResult") : t("search.multipleResults")}`;
-  return /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search", children: [
-    /* @__PURE__ */ jsx110("div", { className: "layer-ui__search-header", children: /* @__PURE__ */ jsx110(
+  return /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search", children: [
+    /* @__PURE__ */ jsx111("div", { className: "layer-ui__search-header", children: /* @__PURE__ */ jsx111(
       TextField,
       {
         className: CLASSES7.SEARCH_MENU_INPUT_WRAPPER,
@@ -26423,15 +26834,15 @@ var SearchMenu2 = () => {
         selectOnRender: true
       }
     ) }),
-    /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search-count", children: [
-      searchMatches.items.length > 0 && /* @__PURE__ */ jsxs64(Fragment18, { children: [
-        focusIndex !== null && focusIndex > -1 ? /* @__PURE__ */ jsxs64("div", { children: [
+    /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search-count", children: [
+      searchMatches.items.length > 0 && /* @__PURE__ */ jsxs65(Fragment19, { children: [
+        focusIndex !== null && focusIndex > -1 ? /* @__PURE__ */ jsxs65("div", { children: [
           focusIndex + 1,
           " / ",
           matchCount
-        ] }) : /* @__PURE__ */ jsx110("div", { children: matchCount }),
-        /* @__PURE__ */ jsxs64("div", { className: "result-nav", children: [
-          /* @__PURE__ */ jsx110(
+        ] }) : /* @__PURE__ */ jsx111("div", { children: matchCount }),
+        /* @__PURE__ */ jsxs65("div", { className: "result-nav", children: [
+          /* @__PURE__ */ jsx111(
             Button,
             {
               onSelect: () => {
@@ -26441,7 +26852,7 @@ var SearchMenu2 = () => {
               children: collapseDownIcon
             }
           ),
-          /* @__PURE__ */ jsx110(
+          /* @__PURE__ */ jsx111(
             Button,
             {
               onSelect: () => {
@@ -26453,9 +26864,9 @@ var SearchMenu2 = () => {
           )
         ] })
       ] }),
-      searchMatches.items.length === 0 && searchQuery && searchedQueryRef.current && /* @__PURE__ */ jsx110("div", { style: { margin: "1rem auto" }, children: t("search.noMatch") })
+      searchMatches.items.length === 0 && searchQuery && searchedQueryRef.current && /* @__PURE__ */ jsx111("div", { style: { margin: "1rem auto" }, children: t("search.noMatch") })
     ] }),
-    /* @__PURE__ */ jsx110(
+    /* @__PURE__ */ jsx111(
       MatchList,
       {
         matches: searchMatches,
@@ -26479,7 +26890,7 @@ var ListItem = (props) => {
     ),
     props.preview.moreAfter ? "..." : ""
   ];
-  return /* @__PURE__ */ jsx110(
+  return /* @__PURE__ */ jsx111(
     "div",
     {
       tabIndex: -1,
@@ -26492,7 +26903,7 @@ var ListItem = (props) => {
           ref?.scrollIntoView({ behavior: "auto", block: "nearest" });
         }
       },
-      children: /* @__PURE__ */ jsx110("div", { className: "preview-text", children: preview.flatMap((text, idx) => /* @__PURE__ */ jsx110(Fragment17, { children: idx === 2 ? /* @__PURE__ */ jsx110("b", { children: text }) : text }, idx)) })
+      children: /* @__PURE__ */ jsx111("div", { className: "preview-text", children: preview.flatMap((text, idx) => /* @__PURE__ */ jsx111(Fragment18, { children: idx === 2 ? /* @__PURE__ */ jsx111("b", { children: text }) : text }, idx)) })
     }
   );
 };
@@ -26505,13 +26916,13 @@ var MatchListBase = (props) => {
     () => props.matches.items.filter((match) => isTextElement12(match.element)),
     [props.matches]
   );
-  return /* @__PURE__ */ jsxs64("div", { children: [
-    frameNameMatches.length > 0 && /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search-result-container", children: [
-      /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search-result-title", children: [
-        /* @__PURE__ */ jsx110("div", { className: "title-icon", children: frameToolIcon }),
-        /* @__PURE__ */ jsx110("div", { children: t("search.frames") })
+  return /* @__PURE__ */ jsxs65("div", { children: [
+    frameNameMatches.length > 0 && /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search-result-container", children: [
+      /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search-result-title", children: [
+        /* @__PURE__ */ jsx111("div", { className: "title-icon", children: frameToolIcon }),
+        /* @__PURE__ */ jsx111("div", { children: t("search.frames") })
       ] }),
-      frameNameMatches.map((searchMatch, index) => /* @__PURE__ */ jsx110(
+      frameNameMatches.map((searchMatch, index) => /* @__PURE__ */ jsx111(
         ListItem,
         {
           searchQuery: props.searchQuery,
@@ -26521,14 +26932,14 @@ var MatchListBase = (props) => {
         },
         searchMatch.element.id + searchMatch.index
       )),
-      textMatches.length > 0 && /* @__PURE__ */ jsx110("div", { className: "layer-ui__divider" })
+      textMatches.length > 0 && /* @__PURE__ */ jsx111("div", { className: "layer-ui__divider" })
     ] }),
-    textMatches.length > 0 && /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search-result-container", children: [
-      /* @__PURE__ */ jsxs64("div", { className: "layer-ui__search-result-title", children: [
-        /* @__PURE__ */ jsx110("div", { className: "title-icon", children: TextIcon }),
-        /* @__PURE__ */ jsx110("div", { children: t("search.texts") })
+    textMatches.length > 0 && /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search-result-container", children: [
+      /* @__PURE__ */ jsxs65("div", { className: "layer-ui__search-result-title", children: [
+        /* @__PURE__ */ jsx111("div", { className: "title-icon", children: TextIcon }),
+        /* @__PURE__ */ jsx111("div", { children: t("search.texts") })
       ] }),
-      textMatches.map((searchMatch, index) => /* @__PURE__ */ jsx110(
+      textMatches.map((searchMatch, index) => /* @__PURE__ */ jsx111(
         ListItem,
         {
           searchQuery: props.searchQuery,
@@ -26767,13 +27178,13 @@ var handleSearch = debounce2(
 );
 
 // components/DefaultSidebar.tsx
-import { jsx as jsx111, jsxs as jsxs65 } from "react/jsx-runtime";
+import { jsx as jsx112, jsxs as jsxs66 } from "react/jsx-runtime";
 import { createElement as createElement2 } from "react";
 var DefaultSidebarTrigger = withInternalFallback(
   "DefaultSidebarTrigger",
   (props) => {
     const { DefaultSidebarTriggerTunnel } = useTunnels();
-    return /* @__PURE__ */ jsx111(DefaultSidebarTriggerTunnel.In, { children: /* @__PURE__ */ jsx111(
+    return /* @__PURE__ */ jsx112(DefaultSidebarTriggerTunnel.In, { children: /* @__PURE__ */ jsx112(
       Sidebar.Trigger,
       {
         ...props,
@@ -26786,7 +27197,7 @@ var DefaultSidebarTrigger = withInternalFallback(
 DefaultSidebarTrigger.displayName = "DefaultSidebarTrigger";
 var DefaultTabTriggers = ({ children }) => {
   const { DefaultSidebarTabTriggersTunnel } = useTunnels();
-  return /* @__PURE__ */ jsx111(DefaultSidebarTabTriggersTunnel.In, { children });
+  return /* @__PURE__ */ jsx112(DefaultSidebarTabTriggersTunnel.In, { children });
 };
 DefaultTabTriggers.displayName = "DefaultTabTriggers";
 var DefaultSidebar = Object.assign(
@@ -26822,14 +27233,14 @@ var DefaultSidebar = Object.assign(
             )
           )
         },
-        /* @__PURE__ */ jsxs65(Sidebar.Tabs, { children: [
-          /* @__PURE__ */ jsx111(Sidebar.Header, { children: /* @__PURE__ */ jsxs65(Sidebar.TabTriggers, { children: [
-            /* @__PURE__ */ jsx111(Sidebar.TabTrigger, { tab: CANVAS_SEARCH_TAB2, children: searchIcon }),
-            /* @__PURE__ */ jsx111(Sidebar.TabTrigger, { tab: LIBRARY_SIDEBAR_TAB2, children: LibraryIcon }),
-            /* @__PURE__ */ jsx111(DefaultSidebarTabTriggersTunnel.Out, {})
+        /* @__PURE__ */ jsxs66(Sidebar.Tabs, { children: [
+          /* @__PURE__ */ jsx112(Sidebar.Header, { children: /* @__PURE__ */ jsxs66(Sidebar.TabTriggers, { children: [
+            /* @__PURE__ */ jsx112(Sidebar.TabTrigger, { tab: CANVAS_SEARCH_TAB2, children: searchIcon }),
+            /* @__PURE__ */ jsx112(Sidebar.TabTrigger, { tab: LIBRARY_SIDEBAR_TAB2, children: LibraryIcon }),
+            /* @__PURE__ */ jsx112(DefaultSidebarTabTriggersTunnel.Out, {})
           ] }) }),
-          /* @__PURE__ */ jsx111(Sidebar.Tab, { tab: LIBRARY_SIDEBAR_TAB2, children: /* @__PURE__ */ jsx111(LibraryMenu, {}) }),
-          /* @__PURE__ */ jsx111(Sidebar.Tab, { tab: CANVAS_SEARCH_TAB2, children: /* @__PURE__ */ jsx111(SearchMenu2, {}) }),
+          /* @__PURE__ */ jsx112(Sidebar.Tab, { tab: LIBRARY_SIDEBAR_TAB2, children: /* @__PURE__ */ jsx112(LibraryMenu, {}) }),
+          /* @__PURE__ */ jsx112(Sidebar.Tab, { tab: CANVAS_SEARCH_TAB2, children: /* @__PURE__ */ jsx112(SearchMenu2, {}) }),
           children
         ] })
       );
@@ -26842,25 +27253,25 @@ var DefaultSidebar = Object.assign(
 );
 
 // components/TTDDialog/TTDDialog.tsx
-import { useEffect as useEffect37, useRef as useRef33, useState as useState33 } from "react";
+import { useEffect as useEffect37, useRef as useRef34, useState as useState34 } from "react";
 import { isFiniteNumber } from "@excalidraw/math";
 
 // components/TTDDialog/MermaidToExcalidraw.tsx
-import { useState as useState32, useRef as useRef31, useEffect as useEffect36, useDeferredValue } from "react";
+import { useState as useState33, useRef as useRef32, useEffect as useEffect36, useDeferredValue } from "react";
 import { EDITOR_LS_KEYS as EDITOR_LS_KEYS3, debounce as debounce3, isDevEnv as isDevEnv9 } from "@excalidraw/common";
 
 // components/TTDDialog/TTDDialogInput.tsx
-import { useEffect as useEffect35, useRef as useRef30 } from "react";
+import { useEffect as useEffect35, useRef as useRef31 } from "react";
 import { EVENT as EVENT13, KEYS as KEYS50 } from "@excalidraw/common";
-import { jsx as jsx112 } from "react/jsx-runtime";
+import { jsx as jsx113 } from "react/jsx-runtime";
 var TTDDialogInput = ({
   input,
   placeholder,
   onChange,
   onKeyboardSubmit
 }) => {
-  const ref = useRef30(null);
-  const callbackRef = useRef30(onKeyboardSubmit);
+  const ref = useRef31(null);
+  const callbackRef = useRef31(onKeyboardSubmit);
   callbackRef.current = onKeyboardSubmit;
   useEffect35(() => {
     if (!callbackRef.current) {
@@ -26881,7 +27292,7 @@ var TTDDialogInput = ({
       };
     }
   }, []);
-  return /* @__PURE__ */ jsx112(
+  return /* @__PURE__ */ jsx113(
     "textarea",
     {
       className: "ttd-dialog-input",
@@ -26894,16 +27305,16 @@ var TTDDialogInput = ({
 };
 
 // components/TTDDialog/TTDDialogOutput.tsx
-import { jsx as jsx113, jsxs as jsxs66 } from "react/jsx-runtime";
+import { jsx as jsx114, jsxs as jsxs67 } from "react/jsx-runtime";
 var ErrorComp = ({ error }) => {
-  return /* @__PURE__ */ jsxs66(
+  return /* @__PURE__ */ jsxs67(
     "div",
     {
       "data-testid": "ttd-dialog-output-error",
       className: "ttd-dialog-output-error",
       children: [
         "Error! ",
-        /* @__PURE__ */ jsx113("p", { children: error })
+        /* @__PURE__ */ jsx114("p", { children: error })
       ]
     }
   );
@@ -26913,22 +27324,22 @@ var TTDDialogOutput = ({
   canvasRef,
   loaded
 }) => {
-  return /* @__PURE__ */ jsxs66("div", { className: "ttd-dialog-output-wrapper", children: [
-    error && /* @__PURE__ */ jsx113(ErrorComp, { error: error.message }),
-    loaded ? /* @__PURE__ */ jsx113(
+  return /* @__PURE__ */ jsxs67("div", { className: "ttd-dialog-output-wrapper", children: [
+    error && /* @__PURE__ */ jsx114(ErrorComp, { error: error.message }),
+    loaded ? /* @__PURE__ */ jsx114(
       "div",
       {
         ref: canvasRef,
         style: { opacity: error ? "0.15" : 1 },
         className: "ttd-dialog-output-canvas-container"
       }
-    ) : /* @__PURE__ */ jsx113(Spinner_default, { size: "2rem" })
+    ) : /* @__PURE__ */ jsx114(Spinner_default, { size: "2rem" })
   ] });
 };
 
 // components/TTDDialog/TTDDialogPanel.tsx
 import clsx54 from "clsx";
-import { jsx as jsx114, jsxs as jsxs67 } from "react/jsx-runtime";
+import { jsx as jsx115, jsxs as jsxs68 } from "react/jsx-runtime";
 var TTDDialogPanel = ({
   label,
   children,
@@ -26939,13 +27350,13 @@ var TTDDialogPanel = ({
   renderSubmitShortcut,
   renderBottomRight
 }) => {
-  return /* @__PURE__ */ jsxs67("div", { className: "ttd-dialog-panel", children: [
-    /* @__PURE__ */ jsxs67("div", { className: "ttd-dialog-panel__header", children: [
-      /* @__PURE__ */ jsx114("label", { children: label }),
+  return /* @__PURE__ */ jsxs68("div", { className: "ttd-dialog-panel", children: [
+    /* @__PURE__ */ jsxs68("div", { className: "ttd-dialog-panel__header", children: [
+      /* @__PURE__ */ jsx115("label", { children: label }),
       renderTopRight?.()
     ] }),
     children,
-    /* @__PURE__ */ jsxs67(
+    /* @__PURE__ */ jsxs68(
       "div",
       {
         className: clsx54("ttd-dialog-panel-button-container", {
@@ -26953,7 +27364,7 @@ var TTDDialogPanel = ({
         }),
         style: { display: "flex", alignItems: "center" },
         children: [
-          /* @__PURE__ */ jsxs67(
+          /* @__PURE__ */ jsxs68(
             Button,
             {
               className: "ttd-dialog-panel-button",
@@ -26961,11 +27372,11 @@ var TTDDialogPanel = ({
               },
               disabled: panelActionDisabled || onTextSubmitInProgess,
               children: [
-                /* @__PURE__ */ jsxs67("div", { className: clsx54({ invisible: onTextSubmitInProgess }), children: [
+                /* @__PURE__ */ jsxs68("div", { className: clsx54({ invisible: onTextSubmitInProgess }), children: [
                   panelAction?.label,
-                  panelAction?.icon && /* @__PURE__ */ jsx114("span", { children: panelAction.icon })
+                  panelAction?.icon && /* @__PURE__ */ jsx115("span", { children: panelAction.icon })
                 ] }),
-                onTextSubmitInProgess && /* @__PURE__ */ jsx114(Spinner_default, {})
+                onTextSubmitInProgess && /* @__PURE__ */ jsx115(Spinner_default, {})
               ]
             }
           ),
@@ -26978,17 +27389,17 @@ var TTDDialogPanel = ({
 };
 
 // components/TTDDialog/TTDDialogPanels.tsx
-import { jsx as jsx115 } from "react/jsx-runtime";
+import { jsx as jsx116 } from "react/jsx-runtime";
 var TTDDialogPanels = ({ children }) => {
-  return /* @__PURE__ */ jsx115("div", { className: "ttd-dialog-panels", children });
+  return /* @__PURE__ */ jsx116("div", { className: "ttd-dialog-panels", children });
 };
 
 // components/TTDDialog/TTDDialogSubmitShortcut.tsx
-import { jsx as jsx116, jsxs as jsxs68 } from "react/jsx-runtime";
+import { jsx as jsx117, jsxs as jsxs69 } from "react/jsx-runtime";
 var TTDDialogSubmitShortcut = () => {
-  return /* @__PURE__ */ jsxs68("div", { className: "ttd-dialog-submit-shortcut", children: [
-    /* @__PURE__ */ jsx116("div", { className: "ttd-dialog-submit-shortcut__key", children: getShortcutKey("CtrlOrCmd") }),
-    /* @__PURE__ */ jsx116("div", { className: "ttd-dialog-submit-shortcut__key", children: getShortcutKey("Enter") })
+  return /* @__PURE__ */ jsxs69("div", { className: "ttd-dialog-submit-shortcut", children: [
+    /* @__PURE__ */ jsx117("div", { className: "ttd-dialog-submit-shortcut__key", children: getShortcutKey("CtrlOrCmd") }),
+    /* @__PURE__ */ jsx117("div", { className: "ttd-dialog-submit-shortcut__key", children: getShortcutKey("Enter") })
   ] });
 };
 
@@ -27097,19 +27508,19 @@ var insertToEditor = ({
 };
 
 // components/TTDDialog/MermaidToExcalidraw.tsx
-import { Fragment as Fragment19, jsx as jsx117, jsxs as jsxs69 } from "react/jsx-runtime";
+import { Fragment as Fragment20, jsx as jsx118, jsxs as jsxs70 } from "react/jsx-runtime";
 var MERMAID_EXAMPLE = "flowchart TD\n A[Christmas] -->|Get money| B(Go shopping)\n B --> C{Let me think}\n C -->|One| D[Laptop]\n C -->|Two| E[iPhone]\n C -->|Three| F[Car]";
 var debouncedSaveMermaidDefinition = debounce3(saveMermaidDataToStorage, 300);
 var MermaidToExcalidraw = ({
   mermaidToExcalidrawLib
 }) => {
-  const [text, setText] = useState32(
+  const [text, setText] = useState33(
     () => EditorLocalStorage.get(EDITOR_LS_KEYS3.MERMAID_TO_EXCALIDRAW) || MERMAID_EXAMPLE
   );
   const deferredText = useDeferredValue(text.trim());
-  const [error, setError] = useState32(null);
-  const canvasRef = useRef31(null);
-  const data = useRef31({ elements: [], files: null });
+  const [error, setError] = useState33(null);
+  const canvasRef = useRef32(null);
+  const data = useRef32({ elements: [], files: null });
   const app = useApp();
   useEffect36(() => {
     convertMermaidToExcalidraw({
@@ -27139,18 +27550,18 @@ var MermaidToExcalidraw = ({
       shouldSaveMermaidDataToStorage: true
     });
   };
-  return /* @__PURE__ */ jsxs69(Fragment19, { children: [
-    /* @__PURE__ */ jsx117("div", { className: "ttd-dialog-desc", children: /* @__PURE__ */ jsx117(
+  return /* @__PURE__ */ jsxs70(Fragment20, { children: [
+    /* @__PURE__ */ jsx118("div", { className: "ttd-dialog-desc", children: /* @__PURE__ */ jsx118(
       Trans_default,
       {
         i18nKey: "mermaid.description",
-        flowchartLink: (el) => /* @__PURE__ */ jsx117("a", { href: "https://mermaid.js.org/syntax/flowchart.html", children: el }),
-        sequenceLink: (el) => /* @__PURE__ */ jsx117("a", { href: "https://mermaid.js.org/syntax/sequenceDiagram.html", children: el }),
-        classLink: (el) => /* @__PURE__ */ jsx117("a", { href: "https://mermaid.js.org/syntax/classDiagram.html", children: el })
+        flowchartLink: (el) => /* @__PURE__ */ jsx118("a", { href: "https://mermaid.js.org/syntax/flowchart.html", children: el }),
+        sequenceLink: (el) => /* @__PURE__ */ jsx118("a", { href: "https://mermaid.js.org/syntax/sequenceDiagram.html", children: el }),
+        classLink: (el) => /* @__PURE__ */ jsx118("a", { href: "https://mermaid.js.org/syntax/classDiagram.html", children: el })
       }
     ) }),
-    /* @__PURE__ */ jsxs69(TTDDialogPanels, { children: [
-      /* @__PURE__ */ jsx117(TTDDialogPanel, { label: t("mermaid.syntax"), children: /* @__PURE__ */ jsx117(
+    /* @__PURE__ */ jsxs70(TTDDialogPanels, { children: [
+      /* @__PURE__ */ jsx118(TTDDialogPanel, { label: t("mermaid.syntax"), children: /* @__PURE__ */ jsx118(
         TTDDialogInput,
         {
           input: text,
@@ -27161,7 +27572,7 @@ var MermaidToExcalidraw = ({
           }
         }
       ) }),
-      /* @__PURE__ */ jsx117(
+      /* @__PURE__ */ jsx118(
         TTDDialogPanel,
         {
           label: t("mermaid.preview"),
@@ -27172,8 +27583,8 @@ var MermaidToExcalidraw = ({
             label: t("mermaid.button"),
             icon: ArrowRightIcon
           },
-          renderSubmitShortcut: () => /* @__PURE__ */ jsx117(TTDDialogSubmitShortcut, {}),
-          children: /* @__PURE__ */ jsx117(
+          renderSubmitShortcut: () => /* @__PURE__ */ jsx118(TTDDialogSubmitShortcut, {}),
+          children: /* @__PURE__ */ jsx118(
             TTDDialogOutput,
             {
               canvasRef,
@@ -27190,14 +27601,14 @@ var MermaidToExcalidraw_default = MermaidToExcalidraw;
 
 // components/TTDDialog/TTDDialogTabs.tsx
 import * as RadixTabs5 from "@radix-ui/react-tabs";
-import { useRef as useRef32 } from "react";
+import { useRef as useRef33 } from "react";
 import { isMemberOf as isMemberOf2 } from "@excalidraw/common";
-import { jsx as jsx118 } from "react/jsx-runtime";
+import { jsx as jsx119 } from "react/jsx-runtime";
 var TTDDialogTabs = (props) => {
   const setAppState = useExcalidrawSetAppState();
-  const rootRef = useRef32(null);
-  const minHeightRef = useRef32(0);
-  return /* @__PURE__ */ jsx118(
+  const rootRef = useRef33(null);
+  const minHeightRef = useRef33(0);
+  return /* @__PURE__ */ jsx119(
     RadixTabs5.Root,
     {
       ref: rootRef,
@@ -27230,42 +27641,42 @@ var TTDDialogTabs_default = TTDDialogTabs;
 
 // components/TTDDialog/TTDDialogTabTriggers.tsx
 import * as RadixTabs6 from "@radix-ui/react-tabs";
-import { jsx as jsx119 } from "react/jsx-runtime";
+import { jsx as jsx120 } from "react/jsx-runtime";
 var TTDDialogTabTriggers = ({
   children,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx119(RadixTabs6.List, { className: "ttd-dialog-triggers", ...rest, children });
+  return /* @__PURE__ */ jsx120(RadixTabs6.List, { className: "ttd-dialog-triggers", ...rest, children });
 };
 TTDDialogTabTriggers.displayName = "TTDDialogTabTriggers";
 
 // components/TTDDialog/TTDDialogTabTrigger.tsx
 import * as RadixTabs7 from "@radix-ui/react-tabs";
-import { jsx as jsx120 } from "react/jsx-runtime";
+import { jsx as jsx121 } from "react/jsx-runtime";
 var TTDDialogTabTrigger = ({
   children,
   tab,
   onSelect,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx120(RadixTabs7.Trigger, { value: tab, asChild: true, onSelect, children: /* @__PURE__ */ jsx120("button", { type: "button", className: "ttd-dialog-tab-trigger", ...rest, children }) });
+  return /* @__PURE__ */ jsx121(RadixTabs7.Trigger, { value: tab, asChild: true, onSelect, children: /* @__PURE__ */ jsx121("button", { type: "button", className: "ttd-dialog-tab-trigger", ...rest, children }) });
 };
 TTDDialogTabTrigger.displayName = "TTDDialogTabTrigger";
 
 // components/TTDDialog/TTDDialogTab.tsx
 import * as RadixTabs8 from "@radix-ui/react-tabs";
-import { jsx as jsx121 } from "react/jsx-runtime";
+import { jsx as jsx122 } from "react/jsx-runtime";
 var TTDDialogTab = ({
   tab,
   children,
   ...rest
 }) => {
-  return /* @__PURE__ */ jsx121(RadixTabs8.Content, { ...rest, value: tab, children });
+  return /* @__PURE__ */ jsx122(RadixTabs8.Content, { ...rest, value: tab, children });
 };
 TTDDialogTab.displayName = "TTDDialogTab";
 
 // components/TTDDialog/TTDDialog.tsx
-import { jsx as jsx122, jsxs as jsxs70 } from "react/jsx-runtime";
+import { jsx as jsx123, jsxs as jsxs71 } from "react/jsx-runtime";
 var MIN_PROMPT_LENGTH = 3;
 var MAX_PROMPT_LENGTH = 1e3;
 var rateLimitsAtom = atom(null);
@@ -27275,7 +27686,7 @@ var TTDDialog = (props) => {
   if (appState.openDialog?.name !== "ttd") {
     return null;
   }
-  return /* @__PURE__ */ jsx122(TTDDialogBase, { ...props, tab: appState.openDialog.tab });
+  return /* @__PURE__ */ jsx123(TTDDialogBase, { ...props, tab: appState.openDialog.tab });
 };
 var TTDDialogBase = withInternalFallback(
   "TTDDialogBase",
@@ -27285,9 +27696,9 @@ var TTDDialogBase = withInternalFallback(
   }) => {
     const app = useApp();
     const setAppState = useExcalidrawSetAppState();
-    const someRandomDivRef = useRef33(null);
+    const someRandomDivRef = useRef34(null);
     const [ttdGeneration, setTtdGeneration] = useAtom(ttdGenerationAtom);
-    const [text, setText] = useState33(ttdGeneration?.prompt ?? "");
+    const [text, setText] = useState34(ttdGeneration?.prompt ?? "");
     const prompt = text.trim();
     const handleTextChange = (event) => {
       setText(event.target.value);
@@ -27296,7 +27707,7 @@ var TTDDialogBase = withInternalFallback(
         prompt: event.target.value
       }));
     };
-    const [onTextSubmitInProgess, setOnTextSubmitInProgess] = useState33(false);
+    const [onTextSubmitInProgess, setOnTextSubmitInProgess] = useState34(false);
     const [rateLimits, setRateLimits] = useAtom(rateLimitsAtom);
     const onGenerate = async () => {
       if (prompt.length > MAX_PROMPT_LENGTH || prompt.length < MIN_PROMPT_LENGTH || onTextSubmitInProgess || rateLimits?.rateLimitRemaining === 0 || // means this is not a text-to-diagram dialog (needed for TS only)
@@ -27374,9 +27785,9 @@ TTD mermaid definition render errror: ${error3.message}`,
         setOnTextSubmitInProgess(false);
       }
     };
-    const refOnGenerate = useRef33(onGenerate);
+    const refOnGenerate = useRef34(onGenerate);
     refOnGenerate.current = onGenerate;
-    const [mermaidToExcalidrawLib, setMermaidToExcalidrawLib] = useState33({
+    const [mermaidToExcalidrawLib, setMermaidToExcalidrawLib] = useState34({
       loaded: false,
       api: import("@excalidraw/mermaid-to-excalidraw")
     });
@@ -27387,9 +27798,9 @@ TTD mermaid definition render errror: ${error3.message}`,
       };
       fn();
     }, [mermaidToExcalidrawLib.api]);
-    const data = useRef33({ elements: [], files: null });
-    const [error, setError] = useState33(null);
-    return /* @__PURE__ */ jsx122(
+    const data = useRef34({ elements: [], files: null });
+    const [error, setError] = useState34(null);
+    return /* @__PURE__ */ jsx123(
       Dialog,
       {
         className: "ttd-dialog",
@@ -27400,11 +27811,11 @@ TTD mermaid definition render errror: ${error3.message}`,
         title: false,
         ...rest,
         autofocus: false,
-        children: /* @__PURE__ */ jsxs70(TTDDialogTabs_default, { dialog: "ttd", tab, children: [
-          "__fallback" in rest && rest.__fallback ? /* @__PURE__ */ jsx122("p", { className: "dialog-mermaid-title", children: t("mermaid.title") }) : /* @__PURE__ */ jsxs70(TTDDialogTabTriggers, { children: [
-            /* @__PURE__ */ jsx122(TTDDialogTabTrigger, { tab: "text-to-diagram", children: /* @__PURE__ */ jsxs70("div", { style: { display: "flex", alignItems: "center" }, children: [
+        children: /* @__PURE__ */ jsxs71(TTDDialogTabs_default, { dialog: "ttd", tab, children: [
+          "__fallback" in rest && rest.__fallback ? /* @__PURE__ */ jsx123("p", { className: "dialog-mermaid-title", children: t("mermaid.title") }) : /* @__PURE__ */ jsxs71(TTDDialogTabTriggers, { children: [
+            /* @__PURE__ */ jsx123(TTDDialogTabTrigger, { tab: "text-to-diagram", children: /* @__PURE__ */ jsxs71("div", { style: { display: "flex", alignItems: "center" }, children: [
               t("labels.textToDiagram"),
-              /* @__PURE__ */ jsx122(
+              /* @__PURE__ */ jsx123(
                 "div",
                 {
                   style: {
@@ -27422,18 +27833,18 @@ TTD mermaid definition render errror: ${error3.message}`,
                 }
               )
             ] }) }),
-            /* @__PURE__ */ jsx122(TTDDialogTabTrigger, { tab: "mermaid", children: "Mermaid" })
+            /* @__PURE__ */ jsx123(TTDDialogTabTrigger, { tab: "mermaid", children: "Mermaid" })
           ] }),
-          /* @__PURE__ */ jsx122(TTDDialogTab, { className: "ttd-dialog-content", tab: "mermaid", children: /* @__PURE__ */ jsx122(
+          /* @__PURE__ */ jsx123(TTDDialogTab, { className: "ttd-dialog-content", tab: "mermaid", children: /* @__PURE__ */ jsx123(
             MermaidToExcalidraw_default,
             {
               mermaidToExcalidrawLib
             }
           ) }),
-          !("__fallback" in rest) && /* @__PURE__ */ jsxs70(TTDDialogTab, { className: "ttd-dialog-content", tab: "text-to-diagram", children: [
-            /* @__PURE__ */ jsx122("div", { className: "ttd-dialog-desc", children: "Currently we use Mermaid as a middle step, so you'll get best results if you describe a diagram, workflow, flow chart, and similar." }),
-            /* @__PURE__ */ jsxs70(TTDDialogPanels, { children: [
-              /* @__PURE__ */ jsx122(
+          !("__fallback" in rest) && /* @__PURE__ */ jsxs71(TTDDialogTab, { className: "ttd-dialog-content", tab: "text-to-diagram", children: [
+            /* @__PURE__ */ jsx123("div", { className: "ttd-dialog-desc", children: "Currently we use Mermaid as a middle step, so you'll get best results if you describe a diagram, workflow, flow chart, and similar." }),
+            /* @__PURE__ */ jsxs71(TTDDialogPanels, { children: [
+              /* @__PURE__ */ jsx123(
                 TTDDialogPanel,
                 {
                   label: t("labels.prompt"),
@@ -27448,7 +27859,7 @@ TTD mermaid definition render errror: ${error3.message}`,
                     if (!rateLimits) {
                       return null;
                     }
-                    return /* @__PURE__ */ jsxs70(
+                    return /* @__PURE__ */ jsxs71(
                       "div",
                       {
                         className: "ttd-dialog-rate-limit",
@@ -27464,10 +27875,10 @@ TTD mermaid definition render errror: ${error3.message}`,
                       }
                     );
                   },
-                  renderSubmitShortcut: () => /* @__PURE__ */ jsx122(TTDDialogSubmitShortcut, {}),
+                  renderSubmitShortcut: () => /* @__PURE__ */ jsx123(TTDDialogSubmitShortcut, {}),
                   renderBottomRight: () => {
                     if (typeof ttdGeneration?.generatedResponse === "string") {
-                      return /* @__PURE__ */ jsxs70(
+                      return /* @__PURE__ */ jsxs71(
                         "div",
                         {
                           className: "excalidraw-link",
@@ -27484,14 +27895,14 @@ TTD mermaid definition render errror: ${error3.message}`,
                           },
                           children: [
                             "View as Mermaid",
-                            /* @__PURE__ */ jsx122(InlineIcon, { icon: ArrowRightIcon })
+                            /* @__PURE__ */ jsx123(InlineIcon, { icon: ArrowRightIcon })
                           ]
                         }
                       );
                     }
                     const ratio = prompt.length / MAX_PROMPT_LENGTH;
                     if (ratio > 0.8) {
-                      return /* @__PURE__ */ jsxs70(
+                      return /* @__PURE__ */ jsxs71(
                         "div",
                         {
                           style: {
@@ -27511,7 +27922,7 @@ TTD mermaid definition render errror: ${error3.message}`,
                     }
                     return null;
                   },
-                  children: /* @__PURE__ */ jsx122(
+                  children: /* @__PURE__ */ jsx123(
                     TTDDialogInput,
                     {
                       onChange: handleTextChange,
@@ -27524,7 +27935,7 @@ TTD mermaid definition render errror: ${error3.message}`,
                   )
                 }
               ),
-              /* @__PURE__ */ jsx122(
+              /* @__PURE__ */ jsx123(
                 TTDDialogPanel,
                 {
                   label: "Preview",
@@ -27536,7 +27947,7 @@ TTD mermaid definition render errror: ${error3.message}`,
                     label: "Insert",
                     icon: ArrowRightIcon
                   },
-                  children: /* @__PURE__ */ jsx122(
+                  children: /* @__PURE__ */ jsx123(
                     TTDDialogOutput,
                     {
                       canvasRef: someRandomDivRef,
@@ -27558,7 +27969,7 @@ TTD mermaid definition render errror: ${error3.message}`,
 import { round as round5 } from "@excalidraw/math";
 import clsx56 from "clsx";
 import throttle2 from "lodash.throttle";
-import { useEffect as useEffect39, useMemo as useMemo11, useState as useState35, memo as memo5 } from "react";
+import { useEffect as useEffect39, useMemo as useMemo11, useState as useState36, memo as memo5 } from "react";
 import { STATS_PANELS } from "@excalidraw/common";
 import { getCommonBounds as getCommonBounds9 } from "@excalidraw/element";
 import { getUncroppedWidthAndHeight as getUncroppedWidthAndHeight3 } from "@excalidraw/element";
@@ -27574,7 +27985,7 @@ import { updateBindings as updateBindings3 } from "@excalidraw/element";
 
 // components/Stats/DragInput.tsx
 import clsx55 from "clsx";
-import { useEffect as useEffect38, useRef as useRef34, useState as useState34 } from "react";
+import { useEffect as useEffect38, useRef as useRef35, useState as useState35 } from "react";
 import { EVENT as EVENT14, KEYS as KEYS51, cloneJSON as cloneJSON4 } from "@excalidraw/common";
 import { deepCopyElement as deepCopyElement4 } from "@excalidraw/element";
 import { CaptureUpdateAction as CaptureUpdateAction36 } from "@excalidraw/element";
@@ -27723,7 +28134,7 @@ var getAtomicUnits = (targetElements, appState) => {
 };
 
 // components/Stats/DragInput.tsx
-import { jsx as jsx123, jsxs as jsxs71 } from "react/jsx-runtime";
+import { jsx as jsx124, jsxs as jsxs72 } from "react/jsx-runtime";
 var StatsDragInput = ({
   label,
   icon,
@@ -27740,10 +28151,10 @@ var StatsDragInput = ({
 }) => {
   const app = useApp();
   const setAppState = useExcalidrawSetAppState();
-  const inputRef = useRef34(null);
-  const labelRef = useRef34(null);
-  const [inputValue, setInputValue] = useState34(value.toString());
-  const stateRef = useRef34(null);
+  const inputRef = useRef35(null);
+  const labelRef = useRef35(null);
+  const [inputValue, setInputValue] = useState35(value.toString());
+  const stateRef = useRef35(null);
   if (!stateRef.current) {
     stateRef.current = {
       originalAppState: cloneJSON4(appState),
@@ -27791,7 +28202,7 @@ var StatsDragInput = ({
       });
     }
   };
-  const callbacksRef = useRef34({});
+  const callbacksRef = useRef35({});
   callbacksRef.current.handleInputValue = handleInputValue;
   useEffect38(() => {
     const input = inputRef.current;
@@ -27828,13 +28239,13 @@ var StatsDragInput = ({
   if (!editable) {
     return null;
   }
-  return /* @__PURE__ */ jsxs71(
+  return /* @__PURE__ */ jsxs72(
     "div",
     {
       className: clsx55("drag-input-container", !editable && "disabled"),
       "data-testid": label,
       children: [
-        /* @__PURE__ */ jsx123(
+        /* @__PURE__ */ jsx124(
           "div",
           {
             className: "drag-input-label",
@@ -27922,10 +28333,10 @@ var StatsDragInput = ({
                 labelRef.current.style.cursor = "ew-resize";
               }
             },
-            children: icon ? /* @__PURE__ */ jsx123(InlineIcon, { icon }) : label
+            children: icon ? /* @__PURE__ */ jsx124(InlineIcon, { icon }) : label
           }
         ),
-        /* @__PURE__ */ jsx123(
+        /* @__PURE__ */ jsx124(
           "input",
           {
             className: "drag-input",
@@ -27972,7 +28383,7 @@ var StatsDragInput = ({
 var DragInput_default = StatsDragInput;
 
 // components/Stats/Angle.tsx
-import { jsx as jsx124 } from "react/jsx-runtime";
+import { jsx as jsx125 } from "react/jsx-runtime";
 var STEP_SIZE2 = 15;
 var handleDegreeChange = ({
   accumulatedChange,
@@ -28020,7 +28431,7 @@ var handleDegreeChange = ({
   }
 };
 var Angle = ({ element, scene, appState, property }) => {
-  return /* @__PURE__ */ jsx124(
+  return /* @__PURE__ */ jsx125(
     DragInput_default,
     {
       label: "A",
@@ -28038,7 +28449,7 @@ var Angle = ({ element, scene, appState, property }) => {
 var Angle_default = Angle;
 
 // components/Stats/CanvasGrid.tsx
-import { jsx as jsx125 } from "react/jsx-runtime";
+import { jsx as jsx126 } from "react/jsx-runtime";
 var STEP_SIZE3 = 5;
 var CanvasGrid = ({
   property,
@@ -28046,7 +28457,7 @@ var CanvasGrid = ({
   appState,
   setAppState
 }) => {
-  return /* @__PURE__ */ jsx125(
+  return /* @__PURE__ */ jsx126(
     DragInput_default,
     {
       label: "Grid step",
@@ -28100,7 +28511,7 @@ import { isImageElement as isImageElement4 } from "@excalidraw/element";
 import { isFrameLikeElement as isFrameLikeElement12 } from "@excalidraw/element";
 import { getElementsInResizingFrame as getElementsInResizingFrame2 } from "@excalidraw/element";
 import { replaceAllElementsInFrame as replaceAllElementsInFrame2 } from "@excalidraw/element";
-import { jsx as jsx126 } from "react/jsx-runtime";
+import { jsx as jsx127 } from "react/jsx-runtime";
 var STEP_SIZE4 = 10;
 var _shouldKeepAspectRatio = (element) => {
   return element.type === "image";
@@ -28338,7 +28749,7 @@ var DimensionDragInput = ({
       value = round3(element.crop.height * ratio, 2);
     }
   }
-  return /* @__PURE__ */ jsx126(
+  return /* @__PURE__ */ jsx127(
     DragInput_default,
     {
       label: property === "width" ? "W" : "H",
@@ -28361,7 +28772,7 @@ import {
   redrawTextBoundingBox as redrawTextBoundingBox7
 } from "@excalidraw/element";
 import { hasBoundTextElement as hasBoundTextElement7, isTextElement as isTextElement13 } from "@excalidraw/element";
-import { jsx as jsx127 } from "react/jsx-runtime";
+import { jsx as jsx128 } from "react/jsx-runtime";
 var MIN_FONT_SIZE = 4;
 var STEP_SIZE5 = 4;
 var handleFontSizeChange = ({
@@ -28409,7 +28820,7 @@ var FontSize = ({ element, scene, appState, property }) => {
   if (!_element) {
     return null;
   }
-  return /* @__PURE__ */ jsx127(
+  return /* @__PURE__ */ jsx128(
     DragInput_default,
     {
       label: "F",
@@ -28430,7 +28841,7 @@ import { degreesToRadians as degreesToRadians3, radiansToDegrees as radiansToDeg
 import { getBoundTextElement as getBoundTextElement12 } from "@excalidraw/element";
 import { isArrowElement as isArrowElement13 } from "@excalidraw/element";
 import { isInGroup as isInGroup2 } from "@excalidraw/element";
-import { jsx as jsx128 } from "react/jsx-runtime";
+import { jsx as jsx129 } from "react/jsx-runtime";
 var STEP_SIZE6 = 15;
 var handleDegreeChange2 = ({
   accumulatedChange,
@@ -28502,7 +28913,7 @@ var MultiAngle = ({
   const editable = editableLatestIndividualElements.some(
     (el) => isPropertyEditable(el, "angle")
   );
-  return /* @__PURE__ */ jsx128(
+  return /* @__PURE__ */ jsx129(
     DragInput_default,
     {
       label: "A",
@@ -28540,7 +28951,7 @@ import { isTextElement as isTextElement14 } from "@excalidraw/element";
 import { getCommonBounds as getCommonBounds7 } from "@excalidraw/element";
 
 // components/Stats/MultiDimension.tsx
-import { jsx as jsx129 } from "react/jsx-runtime";
+import { jsx as jsx130 } from "react/jsx-runtime";
 var STEP_SIZE7 = 10;
 var getResizedUpdates = (anchorX, anchorY, scale, origElement) => {
   const offsetX = origElement.x - anchorX;
@@ -28861,7 +29272,7 @@ var MultiDimension = ({
   );
   const value = new Set(sizes).size === 1 ? Math.round(sizes[0] * 100) / 100 : "Mixed";
   const editable = sizes.length > 0;
-  return /* @__PURE__ */ jsx129(
+  return /* @__PURE__ */ jsx130(
     DragInput_default,
     {
       label: property === "width" ? "W" : "H",
@@ -28885,7 +29296,7 @@ import {
 } from "@excalidraw/element";
 import { hasBoundTextElement as hasBoundTextElement8, isTextElement as isTextElement15 } from "@excalidraw/element";
 import { isInGroup as isInGroup3 } from "@excalidraw/element";
-import { jsx as jsx130 } from "react/jsx-runtime";
+import { jsx as jsx131 } from "react/jsx-runtime";
 var MIN_FONT_SIZE2 = 4;
 var STEP_SIZE8 = 4;
 var getApplicableTextElements = (elements, elementsMap) => elements.reduce(
@@ -28975,7 +29386,7 @@ var MultiFontSize = ({
   );
   const value = new Set(fontSizes).size === 1 ? fontSizes[0] : "Mixed";
   const editable = fontSizes.length > 0;
-  return /* @__PURE__ */ jsx130(
+  return /* @__PURE__ */ jsx131(
     DragInput_default,
     {
       label: "F",
@@ -28997,7 +29408,7 @@ import { pointFrom as pointFrom26, pointRotateRads as pointRotateRads17 } from "
 import { useMemo as useMemo10 } from "react";
 import { isTextElement as isTextElement16 } from "@excalidraw/element";
 import { getCommonBounds as getCommonBounds8 } from "@excalidraw/element";
-import { jsx as jsx131 } from "react/jsx-runtime";
+import { jsx as jsx132 } from "react/jsx-runtime";
 var moveElements = (property, changeInTopX, changeInTopY, originalElements, originalElementsMap, scene, appState) => {
   for (let i = 0; i < originalElements.length; i++) {
     const origElement = originalElements[i];
@@ -29163,7 +29574,7 @@ var MultiPosition = ({
     [atomicUnits, elementsMap, property]
   );
   const value = new Set(positions).size === 1 ? positions[0] : "Mixed";
-  return /* @__PURE__ */ jsx131(
+  return /* @__PURE__ */ jsx132(
     DragInput_default,
     {
       label: property === "x" ? "X" : "Y",
@@ -29185,7 +29596,7 @@ import {
   getUncroppedWidthAndHeight as getUncroppedWidthAndHeight2
 } from "@excalidraw/element";
 import { isImageElement as isImageElement5 } from "@excalidraw/element";
-import { jsx as jsx132 } from "react/jsx-runtime";
+import { jsx as jsx133 } from "react/jsx-runtime";
 var handlePositionChange2 = ({
   accumulatedChange,
   instantChange,
@@ -29321,7 +29732,7 @@ var Position = ({
       );
     }
   }
-  return /* @__PURE__ */ jsx132(
+  return /* @__PURE__ */ jsx133(
     DragInput_default,
     {
       label: property === "x" ? "X" : "Y",
@@ -29337,7 +29748,7 @@ var Position = ({
 var Position_default = Position;
 
 // components/Stats/index.tsx
-import { Fragment as Fragment20, jsx as jsx133, jsxs as jsxs72 } from "react/jsx-runtime";
+import { Fragment as Fragment21, jsx as jsx134, jsxs as jsxs73 } from "react/jsx-runtime";
 var STATS_TIMEOUT = 50;
 var Stats = (props) => {
   const appState = useExcalidrawAppState();
@@ -29347,7 +29758,7 @@ var Stats = (props) => {
     includeBoundTextElement: false
   });
   const gridModeEnabled = isGridModeEnabled(props.app);
-  return /* @__PURE__ */ jsx133(
+  return /* @__PURE__ */ jsx134(
     StatsInner,
     {
       ...props,
@@ -29364,7 +29775,7 @@ var StatsRow = ({
   heading,
   style,
   ...rest
-}) => /* @__PURE__ */ jsx133(
+}) => /* @__PURE__ */ jsx134(
   "div",
   {
     className: clsx56("exc-stats__row", { "exc-stats__row--heading": heading }),
@@ -29382,7 +29793,7 @@ var StatsRows = ({
   order,
   style,
   ...rest
-}) => /* @__PURE__ */ jsx133("div", { className: "exc-stats__rows", style: { order, ...style }, ...rest, children });
+}) => /* @__PURE__ */ jsx134("div", { className: "exc-stats__rows", style: { order, ...style }, ...rest, children });
 StatsRows.displayName = "StatsRows";
 Stats.StatsRow = StatsRow;
 Stats.StatsRows = StatsRows;
@@ -29404,7 +29815,7 @@ var StatsInner = memo5(
     const multipleElements = selectedElements.length > 1 ? selectedElements : null;
     const cropMode = appState.croppingElementId && isImageElement6(singleElement);
     const unCroppedDimension = cropMode ? getUncroppedWidthAndHeight3(singleElement) : null;
-    const [sceneDimension, setSceneDimension] = useState35({
+    const [sceneDimension, setSceneDimension] = useState36({
       width: 0,
       height: 0
     });
@@ -29431,15 +29842,15 @@ var StatsInner = memo5(
     const _frameAndChildrenSelectedTogether = useMemo11(() => {
       return frameAndChildrenSelectedTogether2(selectedElements);
     }, [selectedElements]);
-    return /* @__PURE__ */ jsx133("div", { className: "exc-stats", children: /* @__PURE__ */ jsxs72(Island, { padding: 3, children: [
-      /* @__PURE__ */ jsxs72("div", { className: "title", children: [
-        /* @__PURE__ */ jsx133("h2", { children: t("stats.title") }),
-        /* @__PURE__ */ jsx133("div", { className: "close", onClick: onClose, children: CloseIcon })
+    return /* @__PURE__ */ jsx134("div", { className: "exc-stats", children: /* @__PURE__ */ jsxs73(Island, { padding: 3, children: [
+      /* @__PURE__ */ jsxs73("div", { className: "title", children: [
+        /* @__PURE__ */ jsx134("h2", { children: t("stats.title") }),
+        /* @__PURE__ */ jsx134("div", { className: "close", onClick: onClose, children: CloseIcon })
       ] }),
-      /* @__PURE__ */ jsxs72(
+      /* @__PURE__ */ jsxs73(
         Collapsible_default,
         {
-          label: /* @__PURE__ */ jsx133("h3", { children: t("stats.generalStats") }),
+          label: /* @__PURE__ */ jsx134("h3", { children: t("stats.generalStats") }),
           open: !!(appState.stats.panels & STATS_PANELS.generalStats),
           openTrigger: () => setAppState((state) => {
             return {
@@ -29450,23 +29861,23 @@ var StatsInner = memo5(
             };
           }),
           children: [
-            /* @__PURE__ */ jsxs72(StatsRows, { children: [
-              /* @__PURE__ */ jsx133(StatsRow, { heading: true, children: t("stats.scene") }),
-              /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, children: [
-                /* @__PURE__ */ jsx133("div", { children: t("stats.shapes") }),
-                /* @__PURE__ */ jsx133("div", { children: elements.length })
+            /* @__PURE__ */ jsxs73(StatsRows, { children: [
+              /* @__PURE__ */ jsx134(StatsRow, { heading: true, children: t("stats.scene") }),
+              /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, children: [
+                /* @__PURE__ */ jsx134("div", { children: t("stats.shapes") }),
+                /* @__PURE__ */ jsx134("div", { children: elements.length })
               ] }),
-              /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, children: [
-                /* @__PURE__ */ jsx133("div", { children: t("stats.width") }),
-                /* @__PURE__ */ jsx133("div", { children: sceneDimension.width })
+              /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, children: [
+                /* @__PURE__ */ jsx134("div", { children: t("stats.width") }),
+                /* @__PURE__ */ jsx134("div", { children: sceneDimension.width })
               ] }),
-              /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, children: [
-                /* @__PURE__ */ jsx133("div", { children: t("stats.height") }),
-                /* @__PURE__ */ jsx133("div", { children: sceneDimension.height })
+              /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, children: [
+                /* @__PURE__ */ jsx134("div", { children: t("stats.height") }),
+                /* @__PURE__ */ jsx134("div", { children: sceneDimension.height })
               ] }),
-              gridModeEnabled && /* @__PURE__ */ jsxs72(Fragment20, { children: [
-                /* @__PURE__ */ jsx133(StatsRow, { heading: true, children: "Canvas" }),
-                /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+              gridModeEnabled && /* @__PURE__ */ jsxs73(Fragment21, { children: [
+                /* @__PURE__ */ jsx134(StatsRow, { heading: true, children: "Canvas" }),
+                /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                   CanvasGrid_default,
                   {
                     property: "gridStep",
@@ -29481,17 +29892,17 @@ var StatsInner = memo5(
           ]
         }
       ),
-      !_frameAndChildrenSelectedTogether && selectedElements.length > 0 && /* @__PURE__ */ jsx133(
+      !_frameAndChildrenSelectedTogether && selectedElements.length > 0 && /* @__PURE__ */ jsx134(
         "div",
         {
           id: "elementStats",
           style: {
             marginTop: 12
           },
-          children: /* @__PURE__ */ jsx133(
+          children: /* @__PURE__ */ jsx134(
             Collapsible_default,
             {
-              label: /* @__PURE__ */ jsx133("h3", { children: t("stats.elementProperties") }),
+              label: /* @__PURE__ */ jsx134("h3", { children: t("stats.elementProperties") }),
               open: !!(appState.stats.panels & STATS_PANELS.elementProperties),
               openTrigger: () => setAppState((state) => {
                 return {
@@ -29501,18 +29912,18 @@ var StatsInner = memo5(
                   }
                 };
               }),
-              children: /* @__PURE__ */ jsxs72(StatsRows, { children: [
-                singleElement && /* @__PURE__ */ jsxs72(Fragment20, { children: [
-                  cropMode && /* @__PURE__ */ jsx133(StatsRow, { heading: true, children: t("labels.unCroppedDimension") }),
-                  appState.croppingElementId && isImageElement6(singleElement) && unCroppedDimension && /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, children: [
-                    /* @__PURE__ */ jsx133("div", { children: t("stats.width") }),
-                    /* @__PURE__ */ jsx133("div", { children: round5(unCroppedDimension.width, 2) })
+              children: /* @__PURE__ */ jsxs73(StatsRows, { children: [
+                singleElement && /* @__PURE__ */ jsxs73(Fragment21, { children: [
+                  cropMode && /* @__PURE__ */ jsx134(StatsRow, { heading: true, children: t("labels.unCroppedDimension") }),
+                  appState.croppingElementId && isImageElement6(singleElement) && unCroppedDimension && /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, children: [
+                    /* @__PURE__ */ jsx134("div", { children: t("stats.width") }),
+                    /* @__PURE__ */ jsx134("div", { children: round5(unCroppedDimension.width, 2) })
                   ] }),
-                  appState.croppingElementId && isImageElement6(singleElement) && unCroppedDimension && /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, children: [
-                    /* @__PURE__ */ jsx133("div", { children: t("stats.height") }),
-                    /* @__PURE__ */ jsx133("div", { children: round5(unCroppedDimension.height, 2) })
+                  appState.croppingElementId && isImageElement6(singleElement) && unCroppedDimension && /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, children: [
+                    /* @__PURE__ */ jsx134("div", { children: t("stats.height") }),
+                    /* @__PURE__ */ jsx134("div", { children: round5(unCroppedDimension.height, 2) })
                   ] }),
-                  /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(
                     StatsRow,
                     {
                       heading: true,
@@ -29521,7 +29932,7 @@ var StatsInner = memo5(
                       children: appState.croppingElementId ? t("labels.imageCropping") : t(`element.${singleElement.type}`)
                     }
                   ),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     Position_default,
                     {
                       element: singleElement,
@@ -29531,7 +29942,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     Position_default,
                     {
                       element: singleElement,
@@ -29541,7 +29952,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     Dimension_default,
                     {
                       property: "width",
@@ -29550,7 +29961,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     Dimension_default,
                     {
                       property: "height",
@@ -29559,7 +29970,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     Angle_default,
                     {
                       property: "angle",
@@ -29568,7 +29979,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     FontSize_default,
                     {
                       property: "fontSize",
@@ -29578,13 +29989,13 @@ var StatsInner = memo5(
                     }
                   ) })
                 ] }),
-                multipleElements && /* @__PURE__ */ jsxs72(Fragment20, { children: [
-                  elementsAreInSameGroup2(multipleElements) && /* @__PURE__ */ jsx133(StatsRow, { heading: true, children: t("element.group") }),
-                  /* @__PURE__ */ jsxs72(StatsRow, { columns: 2, style: { margin: "0.3125rem 0" }, children: [
-                    /* @__PURE__ */ jsx133("div", { children: t("stats.shapes") }),
-                    /* @__PURE__ */ jsx133("div", { children: selectedElements.length })
+                multipleElements && /* @__PURE__ */ jsxs73(Fragment21, { children: [
+                  elementsAreInSameGroup2(multipleElements) && /* @__PURE__ */ jsx134(StatsRow, { heading: true, children: t("element.group") }),
+                  /* @__PURE__ */ jsxs73(StatsRow, { columns: 2, style: { margin: "0.3125rem 0" }, children: [
+                    /* @__PURE__ */ jsx134("div", { children: t("stats.shapes") }),
+                    /* @__PURE__ */ jsx134("div", { children: selectedElements.length })
                   ] }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiPosition_default,
                     {
                       property: "x",
@@ -29595,7 +30006,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiPosition_default,
                     {
                       property: "y",
@@ -29606,7 +30017,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiDimension_default,
                     {
                       property: "width",
@@ -29617,7 +30028,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiDimension_default,
                     {
                       property: "height",
@@ -29628,7 +30039,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiAngle_default,
                     {
                       property: "angle",
@@ -29637,7 +30048,7 @@ var StatsInner = memo5(
                       appState
                     }
                   ) }),
-                  /* @__PURE__ */ jsx133(StatsRow, { children: /* @__PURE__ */ jsx133(
+                  /* @__PURE__ */ jsx134(StatsRow, { children: /* @__PURE__ */ jsx134(
                     MultiFontSize_default,
                     {
                       property: "fontSize",
@@ -29661,13 +30072,13 @@ var StatsInner = memo5(
 );
 
 // components/ElementLinkDialog.tsx
-import { useCallback as useCallback13, useEffect as useEffect40, useState as useState36 } from "react";
+import { useCallback as useCallback13, useEffect as useEffect40, useState as useState37 } from "react";
 import { normalizeLink as normalizeLink2, KEYS as KEYS52 } from "@excalidraw/common";
 import {
   defaultGetElementLinkFromSelection as defaultGetElementLinkFromSelection2,
   getLinkIdAndTypeFromSelection as getLinkIdAndTypeFromSelection2
 } from "@excalidraw/element";
-import { jsx as jsx134, jsxs as jsxs73 } from "react/jsx-runtime";
+import { jsx as jsx135, jsxs as jsxs74 } from "react/jsx-runtime";
 var ElementLinkDialog = ({
   sourceElementId,
   onClose,
@@ -29677,8 +30088,8 @@ var ElementLinkDialog = ({
 }) => {
   const elementsMap = scene.getNonDeletedElementsMap();
   const originalLink = elementsMap.get(sourceElementId)?.link ?? null;
-  const [nextLink, setNextLink] = useState36(originalLink);
-  const [linkEdited, setLinkEdited] = useState36(false);
+  const [nextLink, setNextLink] = useState37(originalLink);
+  const [linkEdited, setLinkEdited] = useState37(false);
   useEffect40(() => {
     const selectedElements = getSelectedElements(elementsMap, appState);
     let nextLink2 = originalLink;
@@ -29730,13 +30141,13 @@ var ElementLinkDialog = ({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [appState, onClose, handleConfirm]);
-  return /* @__PURE__ */ jsxs73("div", { className: "ElementLinkDialog", children: [
-    /* @__PURE__ */ jsxs73("div", { className: "ElementLinkDialog__header", children: [
-      /* @__PURE__ */ jsx134("h2", { children: t("elementLink.title") }),
-      /* @__PURE__ */ jsx134("p", { children: t("elementLink.desc") })
+  return /* @__PURE__ */ jsxs74("div", { className: "ElementLinkDialog", children: [
+    /* @__PURE__ */ jsxs74("div", { className: "ElementLinkDialog__header", children: [
+      /* @__PURE__ */ jsx135("h2", { children: t("elementLink.title") }),
+      /* @__PURE__ */ jsx135("p", { children: t("elementLink.desc") })
     ] }),
-    /* @__PURE__ */ jsxs73("div", { className: "ElementLinkDialog__input", children: [
-      /* @__PURE__ */ jsx134(
+    /* @__PURE__ */ jsxs74("div", { className: "ElementLinkDialog__input", children: [
+      /* @__PURE__ */ jsx135(
         TextField,
         {
           value: nextLink ?? "",
@@ -29755,7 +30166,7 @@ var ElementLinkDialog = ({
           selectOnRender: true
         }
       ),
-      originalLink && nextLink && /* @__PURE__ */ jsx134(
+      originalLink && nextLink && /* @__PURE__ */ jsx135(
         ToolButton,
         {
           type: "button",
@@ -29771,8 +30182,8 @@ var ElementLinkDialog = ({
         }
       )
     ] }),
-    /* @__PURE__ */ jsxs73("div", { className: "ElementLinkDialog__actions", children: [
-      /* @__PURE__ */ jsx134(
+    /* @__PURE__ */ jsxs74("div", { className: "ElementLinkDialog__actions", children: [
+      /* @__PURE__ */ jsx135(
         DialogActionButton_default,
         {
           label: t("buttons.cancel"),
@@ -29784,7 +30195,7 @@ var ElementLinkDialog = ({
           }
         }
       ),
-      /* @__PURE__ */ jsx134(
+      /* @__PURE__ */ jsx135(
         DialogActionButton_default,
         {
           label: t("buttons.confirm"),
@@ -29798,39 +30209,39 @@ var ElementLinkDialog = ({
 var ElementLinkDialog_default = ElementLinkDialog;
 
 // components/ErrorDialog.tsx
-import React38, { useState as useState37 } from "react";
-import { Fragment as Fragment21, jsx as jsx135 } from "react/jsx-runtime";
+import React39, { useState as useState38 } from "react";
+import { Fragment as Fragment22, jsx as jsx136 } from "react/jsx-runtime";
 var ErrorDialog = ({
   children,
   onClose
 }) => {
-  const [modalIsShown, setModalIsShown] = useState37(!!children);
+  const [modalIsShown, setModalIsShown] = useState38(!!children);
   const { container: excalidrawContainer } = useExcalidrawContainer();
-  const handleClose = React38.useCallback(() => {
+  const handleClose = React39.useCallback(() => {
     setModalIsShown(false);
     if (onClose) {
       onClose();
     }
     excalidrawContainer?.focus();
   }, [onClose, excalidrawContainer]);
-  return /* @__PURE__ */ jsx135(Fragment21, { children: modalIsShown && /* @__PURE__ */ jsx135(
+  return /* @__PURE__ */ jsx136(Fragment22, { children: modalIsShown && /* @__PURE__ */ jsx136(
     Dialog,
     {
       size: "small",
       onCloseRequest: handleClose,
       title: t("errorDialog.title"),
-      children: /* @__PURE__ */ jsx135("div", { style: { whiteSpace: "pre-wrap" }, children })
+      children: /* @__PURE__ */ jsx136("div", { style: { whiteSpace: "pre-wrap" }, children })
     }
   ) });
 };
 
 // components/HelpDialog.tsx
-import React39 from "react";
+import React40 from "react";
 import { isDarwin as isDarwin4, isFirefox as isFirefox3, isWindows as isWindows2 } from "@excalidraw/common";
 import { KEYS as KEYS53 } from "@excalidraw/common";
-import { Fragment as Fragment22, jsx as jsx136, jsxs as jsxs74 } from "react/jsx-runtime";
-var Header = () => /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__header", children: [
-  /* @__PURE__ */ jsxs74(
+import { Fragment as Fragment23, jsx as jsx137, jsxs as jsxs75 } from "react/jsx-runtime";
+var Header = () => /* @__PURE__ */ jsxs75("div", { className: "HelpDialog__header", children: [
+  /* @__PURE__ */ jsxs75(
     "a",
     {
       className: "HelpDialog__btn",
@@ -29838,12 +30249,12 @@ var Header = () => /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__heade
       target: "_blank",
       rel: "noopener",
       children: [
-        /* @__PURE__ */ jsx136("div", { className: "HelpDialog__link-icon", children: ExternalLinkIcon }),
+        /* @__PURE__ */ jsx137("div", { className: "HelpDialog__link-icon", children: ExternalLinkIcon }),
         t("helpDialog.documentation")
       ]
     }
   ),
-  /* @__PURE__ */ jsxs74(
+  /* @__PURE__ */ jsxs75(
     "a",
     {
       className: "HelpDialog__btn",
@@ -29851,12 +30262,12 @@ var Header = () => /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__heade
       target: "_blank",
       rel: "noopener",
       children: [
-        /* @__PURE__ */ jsx136("div", { className: "HelpDialog__link-icon", children: ExternalLinkIcon }),
+        /* @__PURE__ */ jsx137("div", { className: "HelpDialog__link-icon", children: ExternalLinkIcon }),
         t("helpDialog.blog")
       ]
     }
   ),
-  /* @__PURE__ */ jsxs74(
+  /* @__PURE__ */ jsxs75(
     "a",
     {
       className: "HelpDialog__btn",
@@ -29864,12 +30275,12 @@ var Header = () => /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__heade
       target: "_blank",
       rel: "noopener noreferrer",
       children: [
-        /* @__PURE__ */ jsx136("div", { className: "HelpDialog__link-icon", children: GithubIcon }),
+        /* @__PURE__ */ jsx137("div", { className: "HelpDialog__link-icon", children: GithubIcon }),
         t("helpDialog.github")
       ]
     }
   ),
-  /* @__PURE__ */ jsxs74(
+  /* @__PURE__ */ jsxs75(
     "a",
     {
       className: "HelpDialog__btn",
@@ -29877,19 +30288,19 @@ var Header = () => /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__heade
       target: "_blank",
       rel: "noopener noreferrer",
       children: [
-        /* @__PURE__ */ jsx136("div", { className: "HelpDialog__link-icon", children: youtubeIcon }),
+        /* @__PURE__ */ jsx137("div", { className: "HelpDialog__link-icon", children: youtubeIcon }),
         "YouTube"
       ]
     }
   )
 ] });
-var Section2 = (props) => /* @__PURE__ */ jsxs74(Fragment22, { children: [
-  /* @__PURE__ */ jsx136("h3", { children: props.title }),
-  /* @__PURE__ */ jsx136("div", { className: "HelpDialog__islands-container", children: props.children })
+var Section2 = (props) => /* @__PURE__ */ jsxs75(Fragment23, { children: [
+  /* @__PURE__ */ jsx137("h3", { children: props.title }),
+  /* @__PURE__ */ jsx137("div", { className: "HelpDialog__islands-container", children: props.children })
 ] });
-var ShortcutIsland = (props) => /* @__PURE__ */ jsxs74("div", { className: `HelpDialog__island ${props.className}`, children: [
-  /* @__PURE__ */ jsx136("h4", { className: "HelpDialog__island-title", children: props.caption }),
-  /* @__PURE__ */ jsx136("div", { className: "HelpDialog__island-content", children: props.children })
+var ShortcutIsland = (props) => /* @__PURE__ */ jsxs75("div", { className: `HelpDialog__island ${props.className}`, children: [
+  /* @__PURE__ */ jsx137("h4", { className: "HelpDialog__island-title", children: props.caption }),
+  /* @__PURE__ */ jsx137("div", { className: "HelpDialog__island-content", children: props.children })
 ] });
 function* intersperse(as, delim) {
   let first = true;
@@ -29911,124 +30322,124 @@ var Shortcut = ({
 }) => {
   const splitShortcutKeys = shortcuts.map((shortcut) => {
     const keys = shortcut.endsWith("++") ? [...shortcut.slice(0, -2).split("+"), "+"] : shortcut.split("+");
-    return keys.map((key) => /* @__PURE__ */ jsx136(ShortcutKey, { children: upperCaseSingleChars(key) }, key));
+    return keys.map((key) => /* @__PURE__ */ jsx137(ShortcutKey, { children: upperCaseSingleChars(key) }, key));
   });
-  return /* @__PURE__ */ jsxs74("div", { className: "HelpDialog__shortcut", children: [
-    /* @__PURE__ */ jsx136("div", { children: label }),
-    /* @__PURE__ */ jsx136("div", { className: "HelpDialog__key-container", children: [...intersperse(splitShortcutKeys, isOr ? t("helpDialog.or") : null)] })
+  return /* @__PURE__ */ jsxs75("div", { className: "HelpDialog__shortcut", children: [
+    /* @__PURE__ */ jsx137("div", { children: label }),
+    /* @__PURE__ */ jsx137("div", { className: "HelpDialog__key-container", children: [...intersperse(splitShortcutKeys, isOr ? t("helpDialog.or") : null)] })
   ] });
 };
-var ShortcutKey = (props) => /* @__PURE__ */ jsx136("kbd", { className: "HelpDialog__key", ...props });
+var ShortcutKey = (props) => /* @__PURE__ */ jsx137("kbd", { className: "HelpDialog__key", ...props });
 var HelpDialog = ({ onClose }) => {
-  const handleClose = React39.useCallback(() => {
+  const handleClose = React40.useCallback(() => {
     if (onClose) {
       onClose();
     }
   }, [onClose]);
-  return /* @__PURE__ */ jsx136(Fragment22, { children: /* @__PURE__ */ jsxs74(
+  return /* @__PURE__ */ jsx137(Fragment23, { children: /* @__PURE__ */ jsxs75(
     Dialog,
     {
       onCloseRequest: handleClose,
       title: t("helpDialog.title"),
       className: "HelpDialog",
       children: [
-        /* @__PURE__ */ jsx136(Header, {}),
-        /* @__PURE__ */ jsxs74(Section2, { title: t("helpDialog.shortcuts"), children: [
-          /* @__PURE__ */ jsxs74(
+        /* @__PURE__ */ jsx137(Header, {}),
+        /* @__PURE__ */ jsxs75(Section2, { title: t("helpDialog.shortcuts"), children: [
+          /* @__PURE__ */ jsxs75(
             ShortcutIsland,
             {
               className: "HelpDialog__island--tools",
               caption: t("helpDialog.tools"),
               children: [
-                /* @__PURE__ */ jsx136(Shortcut, { label: t("toolBar.hand"), shortcuts: [KEYS53.H] }),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(Shortcut, { label: t("toolBar.hand"), shortcuts: [KEYS53.H] }),
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.selection"),
                     shortcuts: [KEYS53.V, KEYS53["1"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.rectangle"),
                     shortcuts: [KEYS53.R, KEYS53["2"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.diamond"),
                     shortcuts: [KEYS53.D, KEYS53["3"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.ellipse"),
                     shortcuts: [KEYS53.O, KEYS53["4"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.arrow"),
                     shortcuts: [KEYS53.A, KEYS53["5"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.line"),
                     shortcuts: [KEYS53.L, KEYS53["6"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.freedraw"),
                     shortcuts: [KEYS53.P, KEYS53["7"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.text"),
                     shortcuts: [KEYS53.T, KEYS53["8"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(Shortcut, { label: t("toolBar.image"), shortcuts: [KEYS53["9"]] }),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(Shortcut, { label: t("toolBar.image"), shortcuts: [KEYS53["9"]] }),
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.eraser"),
                     shortcuts: [KEYS53.E, KEYS53["0"]]
                   }
                 ),
-                /* @__PURE__ */ jsx136(Shortcut, { label: t("toolBar.frame"), shortcuts: [KEYS53.F] }),
-                /* @__PURE__ */ jsx136(Shortcut, { label: t("toolBar.laser"), shortcuts: [KEYS53.K] }),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(Shortcut, { label: t("toolBar.frame"), shortcuts: [KEYS53.F] }),
+                /* @__PURE__ */ jsx137(Shortcut, { label: t("toolBar.laser"), shortcuts: [KEYS53.K] }),
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.eyeDropper"),
                     shortcuts: [KEYS53.I, "Shift+S", "Shift+G"]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.editLineArrowPoints"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Enter")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.editText"),
                     shortcuts: [getShortcutKey("Enter")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.textNewLine"),
@@ -30038,7 +30449,7 @@ var HelpDialog = ({ onClose }) => {
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.textFinish"),
@@ -30048,7 +30459,7 @@ var HelpDialog = ({ onClose }) => {
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.curvedArrow"),
@@ -30061,7 +30472,7 @@ var HelpDialog = ({ onClose }) => {
                     isOr: false
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.curvedLine"),
@@ -30074,7 +30485,7 @@ var HelpDialog = ({ onClose }) => {
                     isOr: false
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.cropStart"),
@@ -30082,7 +30493,7 @@ var HelpDialog = ({ onClose }) => {
                     isOr: true
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.cropFinish"),
@@ -30090,22 +30501,22 @@ var HelpDialog = ({ onClose }) => {
                     isOr: true
                   }
                 ),
-                /* @__PURE__ */ jsx136(Shortcut, { label: t("toolBar.lock"), shortcuts: [KEYS53.Q] }),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(Shortcut, { label: t("toolBar.lock"), shortcuts: [KEYS53.Q] }),
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.preventBinding"),
                     shortcuts: [getShortcutKey("CtrlOrCmd")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.link"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+K")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("toolBar.convertElementType"),
@@ -30116,111 +30527,111 @@ var HelpDialog = ({ onClose }) => {
               ]
             }
           ),
-          /* @__PURE__ */ jsxs74(
+          /* @__PURE__ */ jsxs75(
             ShortcutIsland,
             {
               className: "HelpDialog__island--view",
               caption: t("helpDialog.view"),
               children: [
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.zoomIn"),
                     shortcuts: [getShortcutKey("CtrlOrCmd++")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.zoomOut"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+-")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.resetZoom"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+0")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.zoomToFit"),
                     shortcuts: ["Shift+1"]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.zoomToSelection"),
                     shortcuts: ["Shift+2"]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.movePageUpDown"),
                     shortcuts: ["PgUp/PgDn"]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.movePageLeftRight"),
                     shortcuts: ["Shift+PgUp/PgDn"]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.zenMode"),
                     shortcuts: [getShortcutKey("Alt+Z")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.objectsSnapMode"),
                     shortcuts: [getShortcutKey("Alt+S")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.toggleGrid"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+'")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.viewMode"),
                     shortcuts: [getShortcutKey("Alt+R")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.toggleTheme"),
                     shortcuts: [getShortcutKey("Alt+Shift+D")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("stats.fullTitle"),
                     shortcuts: [getShortcutKey("Alt+/")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("search.title"),
                     shortcuts: [getShortcutFromShortcutName("searchMenu")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("commandPalette.title"),
@@ -30233,13 +30644,13 @@ var HelpDialog = ({ onClose }) => {
               ]
             }
           ),
-          /* @__PURE__ */ jsxs74(
+          /* @__PURE__ */ jsxs75(
             ShortcutIsland,
             {
               className: "HelpDialog__island--editor",
               caption: t("helpDialog.editor"),
               children: [
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.createFlowchart"),
@@ -30247,7 +30658,7 @@ var HelpDialog = ({ onClose }) => {
                     isOr: true
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.navigateFlowchart"),
@@ -30255,7 +30666,7 @@ var HelpDialog = ({ onClose }) => {
                     isOr: true
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.moveCanvas"),
@@ -30266,98 +30677,98 @@ var HelpDialog = ({ onClose }) => {
                     isOr: true
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.clearReset"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Delete")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.delete"),
                     shortcuts: [getShortcutKey("Delete")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.cut"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+X")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.copy"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+C")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.paste"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+V")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.pasteAsPlaintext"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+V")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.selectAll"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+A")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.multiSelect"),
                     shortcuts: [getShortcutKey(`Shift+${t("helpDialog.click")}`)]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.deepSelect"),
                     shortcuts: [getShortcutKey(`CtrlOrCmd+${t("helpDialog.click")}`)]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.deepBoxSelect"),
                     shortcuts: [getShortcutKey(`CtrlOrCmd+${t("helpDialog.drag")}`)]
                   }
                 ),
-                (probablySupportsClipboardBlob || isFirefox3) && /* @__PURE__ */ jsx136(
+                (probablySupportsClipboardBlob || isFirefox3) && /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.copyAsPng"),
                     shortcuts: [getShortcutKey("Shift+Alt+C")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.copyStyles"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Alt+C")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.pasteStyles"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Alt+V")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.sendToBack"),
@@ -30366,7 +30777,7 @@ var HelpDialog = ({ onClose }) => {
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.bringToFront"),
@@ -30375,49 +30786,49 @@ var HelpDialog = ({ onClose }) => {
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.sendBackward"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+[")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.bringForward"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+]")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.alignTop"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+Up")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.alignBottom"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+Down")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.alignLeft"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+Left")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.alignRight"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+Right")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.duplicateSelection"),
@@ -30427,21 +30838,21 @@ var HelpDialog = ({ onClose }) => {
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("helpDialog.toggleElementLock"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+L")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.undo"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Z")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("buttons.redo"),
@@ -30451,63 +30862,63 @@ var HelpDialog = ({ onClose }) => {
                     ] : [getShortcutKey("CtrlOrCmd+Shift+Z")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.group"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+G")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.ungroup"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+G")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.flipHorizontal"),
                     shortcuts: [getShortcutKey("Shift+H")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.flipVertical"),
                     shortcuts: [getShortcutKey("Shift+V")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.showStroke"),
                     shortcuts: [getShortcutKey("S")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.showBackground"),
                     shortcuts: [getShortcutKey("G")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.showFonts"),
                     shortcuts: [getShortcutKey("Shift+F")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.decreaseFontSize"),
                     shortcuts: [getShortcutKey("CtrlOrCmd+Shift+<")]
                   }
                 ),
-                /* @__PURE__ */ jsx136(
+                /* @__PURE__ */ jsx137(
                   Shortcut,
                   {
                     label: t("labels.increaseFontSize"),
@@ -30534,7 +30945,7 @@ import {
   isTextElement as isTextElement17
 } from "@excalidraw/element";
 import { isNodeInFlowchart } from "@excalidraw/element";
-import { jsx as jsx137 } from "react/jsx-runtime";
+import { jsx as jsx138 } from "react/jsx-runtime";
 var getTaggedShortcutKey = (key) => Array.isArray(key) ? `<kbd>${key.map(getShortcutKey).join(" + ")}</kbd>` : `<kbd>${getShortcutKey(key)}</kbd>`;
 var getHints = ({
   appState,
@@ -30705,15 +31116,15 @@ var HintViewer = ({
   const hintJSX = hint.split(/(<kbd>[^<]+<\/kbd>)/g).map((part, index) => {
     if (index % 2 === 1) {
       const shortcutMatch = part[0] === "<" && part.match(/^<kbd>([^<]+)<\/kbd>$/);
-      return /* @__PURE__ */ jsx137("kbd", { children: shortcutMatch ? shortcutMatch[1] : part }, index);
+      return /* @__PURE__ */ jsx138("kbd", { children: shortcutMatch ? shortcutMatch[1] : part }, index);
     }
     return part;
   });
-  return /* @__PURE__ */ jsx137("div", { className: "HintViewer", children: /* @__PURE__ */ jsx137("span", { children: hintJSX }) });
+  return /* @__PURE__ */ jsx138("div", { className: "HintViewer", children: /* @__PURE__ */ jsx138("span", { children: hintJSX }) });
 };
 
 // components/ImageExportDialog.tsx
-import { useEffect as useEffect41, useRef as useRef36, useState as useState39 } from "react";
+import { useEffect as useEffect41, useRef as useRef37, useState as useState40 } from "react";
 import {
   DEFAULT_EXPORT_PADDING as DEFAULT_EXPORT_PADDING4,
   EXPORT_IMAGE_TYPES,
@@ -30723,11 +31134,11 @@ import {
 } from "@excalidraw/common";
 
 // hooks/useCopiedIndicator.ts
-import { useCallback as useCallback14, useRef as useRef35, useState as useState38 } from "react";
+import { useCallback as useCallback14, useRef as useRef36, useState as useState39 } from "react";
 var TIMEOUT = 2e3;
 var useCopyStatus = () => {
-  const [copyStatus, setCopyStatus] = useState38(null);
-  const timeoutRef = useRef35(0);
+  const [copyStatus, setCopyStatus] = useState39(null);
+  const timeoutRef = useRef36(0);
   const onCopy = () => {
     clearTimeout(timeoutRef.current);
     setCopyStatus("success");
@@ -30747,7 +31158,7 @@ var useCopyStatus = () => {
 
 // components/Switch.tsx
 import clsx57 from "clsx";
-import { jsx as jsx138 } from "react/jsx-runtime";
+import { jsx as jsx139 } from "react/jsx-runtime";
 var Switch = ({
   title,
   name,
@@ -30755,7 +31166,7 @@ var Switch = ({
   onChange,
   disabled = false
 }) => {
-  return /* @__PURE__ */ jsx138("div", { className: clsx57("Switch", { toggled: checked, disabled }), children: /* @__PURE__ */ jsx138(
+  return /* @__PURE__ */ jsx139("div", { className: clsx57("Switch", { toggled: checked, disabled }), children: /* @__PURE__ */ jsx139(
     "input",
     {
       name,
@@ -30775,13 +31186,13 @@ var Switch = ({
 };
 
 // components/ImageExportDialog.tsx
-import { jsx as jsx139, jsxs as jsxs75 } from "react/jsx-runtime";
+import { jsx as jsx140, jsxs as jsxs76 } from "react/jsx-runtime";
 var supportsContextFilters = "filter" in document.createElement("canvas").getContext("2d");
 var ErrorCanvasPreview = () => {
-  return /* @__PURE__ */ jsxs75("div", { children: [
-    /* @__PURE__ */ jsx139("h3", { children: t("canvasError.cannotShowPreview") }),
-    /* @__PURE__ */ jsx139("p", { children: /* @__PURE__ */ jsx139("span", { children: t("canvasError.canvasTooBig") }) }),
-    /* @__PURE__ */ jsxs75("em", { children: [
+  return /* @__PURE__ */ jsxs76("div", { children: [
+    /* @__PURE__ */ jsx140("h3", { children: t("canvasError.cannotShowPreview") }),
+    /* @__PURE__ */ jsx140("p", { children: /* @__PURE__ */ jsx140("span", { children: t("canvasError.canvasTooBig") }) }),
+    /* @__PURE__ */ jsxs76("em", { children: [
       "(",
       t("canvasError.canvasTooBigTip"),
       ")"
@@ -30800,20 +31211,20 @@ var ImageExportModal = ({
     elementsSnapshot,
     appStateSnapshot
   );
-  const [projectName, setProjectName] = useState39(name);
-  const [exportSelectionOnly, setExportSelectionOnly] = useState39(hasSelection);
-  const [exportWithBackground, setExportWithBackground] = useState39(
+  const [projectName, setProjectName] = useState40(name);
+  const [exportSelectionOnly, setExportSelectionOnly] = useState40(hasSelection);
+  const [exportWithBackground, setExportWithBackground] = useState40(
     appStateSnapshot.exportBackground
   );
-  const [exportDarkMode, setExportDarkMode] = useState39(
+  const [exportDarkMode, setExportDarkMode] = useState40(
     appStateSnapshot.exportWithDarkMode
   );
-  const [embedScene, setEmbedScene] = useState39(
+  const [embedScene, setEmbedScene] = useState40(
     appStateSnapshot.exportEmbedScene
   );
-  const [exportScale, setExportScale] = useState39(appStateSnapshot.exportScale);
-  const previewRef = useRef36(null);
-  const [renderError, setRenderError] = useState39(null);
+  const [exportScale, setExportScale] = useState40(appStateSnapshot.exportScale);
+  const previewRef = useRef37(null);
+  const [renderError, setRenderError] = useState40(null);
   const { onCopy, copyStatus, resetCopyStatus } = useCopyStatus();
   useEffect41(() => {
     resetCopyStatus();
@@ -30879,11 +31290,11 @@ var ImageExportModal = ({
     exportScale,
     embedScene
   ]);
-  return /* @__PURE__ */ jsxs75("div", { className: "ImageExportModal", children: [
-    /* @__PURE__ */ jsx139("h3", { children: t("imageExportDialog.header") }),
-    /* @__PURE__ */ jsxs75("div", { className: "ImageExportModal__preview", children: [
-      /* @__PURE__ */ jsx139("div", { className: "ImageExportModal__preview__canvas", ref: previewRef, children: renderError && /* @__PURE__ */ jsx139(ErrorCanvasPreview, {}) }),
-      /* @__PURE__ */ jsx139("div", { className: "ImageExportModal__preview__filename", children: !nativeFileSystemSupported && /* @__PURE__ */ jsx139(
+  return /* @__PURE__ */ jsxs76("div", { className: "ImageExportModal", children: [
+    /* @__PURE__ */ jsx140("h3", { children: t("imageExportDialog.header") }),
+    /* @__PURE__ */ jsxs76("div", { className: "ImageExportModal__preview", children: [
+      /* @__PURE__ */ jsx140("div", { className: "ImageExportModal__preview__canvas", ref: previewRef, children: renderError && /* @__PURE__ */ jsx140(ErrorCanvasPreview, {}) }),
+      /* @__PURE__ */ jsx140("div", { className: "ImageExportModal__preview__filename", children: !nativeFileSystemSupported && /* @__PURE__ */ jsx140(
         "input",
         {
           type: "text",
@@ -30901,14 +31312,14 @@ var ImageExportModal = ({
         }
       ) })
     ] }),
-    /* @__PURE__ */ jsxs75("div", { className: "ImageExportModal__settings", children: [
-      /* @__PURE__ */ jsx139("h3", { children: t("imageExportDialog.header") }),
-      hasSelection && /* @__PURE__ */ jsx139(
+    /* @__PURE__ */ jsxs76("div", { className: "ImageExportModal__settings", children: [
+      /* @__PURE__ */ jsx140("h3", { children: t("imageExportDialog.header") }),
+      hasSelection && /* @__PURE__ */ jsx140(
         ExportSetting,
         {
           label: t("imageExportDialog.label.onlySelected"),
           name: "exportOnlySelected",
-          children: /* @__PURE__ */ jsx139(
+          children: /* @__PURE__ */ jsx140(
             Switch,
             {
               name: "exportOnlySelected",
@@ -30920,12 +31331,12 @@ var ImageExportModal = ({
           )
         }
       ),
-      /* @__PURE__ */ jsx139(
+      /* @__PURE__ */ jsx140(
         ExportSetting,
         {
           label: t("imageExportDialog.label.withBackground"),
           name: "exportBackgroundSwitch",
-          children: /* @__PURE__ */ jsx139(
+          children: /* @__PURE__ */ jsx140(
             Switch,
             {
               name: "exportBackgroundSwitch",
@@ -30942,12 +31353,12 @@ var ImageExportModal = ({
           )
         }
       ),
-      supportsContextFilters && /* @__PURE__ */ jsx139(
+      supportsContextFilters && /* @__PURE__ */ jsx140(
         ExportSetting,
         {
           label: t("imageExportDialog.label.darkMode"),
           name: "exportDarkModeSwitch",
-          children: /* @__PURE__ */ jsx139(
+          children: /* @__PURE__ */ jsx140(
             Switch,
             {
               name: "exportDarkModeSwitch",
@@ -30964,13 +31375,13 @@ var ImageExportModal = ({
           )
         }
       ),
-      /* @__PURE__ */ jsx139(
+      /* @__PURE__ */ jsx140(
         ExportSetting,
         {
           label: t("imageExportDialog.label.embedScene"),
           tooltip: t("imageExportDialog.tooltip.embedScene"),
           name: "exportEmbedSwitch",
-          children: /* @__PURE__ */ jsx139(
+          children: /* @__PURE__ */ jsx140(
             Switch,
             {
               name: "exportEmbedSwitch",
@@ -30987,12 +31398,12 @@ var ImageExportModal = ({
           )
         }
       ),
-      /* @__PURE__ */ jsx139(
+      /* @__PURE__ */ jsx140(
         ExportSetting,
         {
           label: t("imageExportDialog.label.scale"),
           name: "exportScale",
-          children: /* @__PURE__ */ jsx139(
+          children: /* @__PURE__ */ jsx140(
             RadioGroup,
             {
               name: "exportScale",
@@ -31009,8 +31420,8 @@ var ImageExportModal = ({
           )
         }
       ),
-      /* @__PURE__ */ jsxs75("div", { className: "ImageExportModal__settings__buttons", children: [
-        /* @__PURE__ */ jsx139(
+      /* @__PURE__ */ jsxs76("div", { className: "ImageExportModal__settings__buttons", children: [
+        /* @__PURE__ */ jsx140(
           FilledButton,
           {
             className: "ImageExportModal__settings__buttons__button",
@@ -31022,7 +31433,7 @@ var ImageExportModal = ({
             children: t("imageExportDialog.button.exportToPng")
           }
         ),
-        /* @__PURE__ */ jsx139(
+        /* @__PURE__ */ jsx140(
           FilledButton,
           {
             className: "ImageExportModal__settings__buttons__button",
@@ -31034,7 +31445,7 @@ var ImageExportModal = ({
             children: t("imageExportDialog.button.exportToSvg")
           }
         ),
-        (probablySupportsClipboardBlob || isFirefox4) && /* @__PURE__ */ jsx139(
+        (probablySupportsClipboardBlob || isFirefox4) && /* @__PURE__ */ jsx140(
           FilledButton,
           {
             className: "ImageExportModal__settings__buttons__button",
@@ -31064,19 +31475,19 @@ var ExportSetting = ({
   tooltip,
   name
 }) => {
-  return /* @__PURE__ */ jsxs75("div", { className: "ImageExportModal__settings__setting", title: label, children: [
-    /* @__PURE__ */ jsxs75(
+  return /* @__PURE__ */ jsxs76("div", { className: "ImageExportModal__settings__setting", title: label, children: [
+    /* @__PURE__ */ jsxs76(
       "label",
       {
         htmlFor: name,
         className: "ImageExportModal__settings__setting__label",
         children: [
           label,
-          tooltip && /* @__PURE__ */ jsx139(Tooltip, { label: tooltip, long: true, children: helpIcon })
+          tooltip && /* @__PURE__ */ jsx140(Tooltip, { label: tooltip, long: true, children: helpIcon })
         ]
       }
     ),
-    /* @__PURE__ */ jsx139("div", { className: "ImageExportModal__settings__setting__content", children })
+    /* @__PURE__ */ jsx140("div", { className: "ImageExportModal__settings__setting__content", children })
   ] });
 };
 var ImageExportDialog = ({
@@ -31088,13 +31499,13 @@ var ImageExportDialog = ({
   onCloseRequest,
   name
 }) => {
-  const [{ appStateSnapshot, elementsSnapshot }] = useState39(() => {
+  const [{ appStateSnapshot, elementsSnapshot }] = useState40(() => {
     return {
       appStateSnapshot: cloneJSON5(appState),
       elementsSnapshot: cloneJSON5(elements)
     };
   });
-  return /* @__PURE__ */ jsx139(Dialog, { onCloseRequest, size: "wide", title: false, children: /* @__PURE__ */ jsx139(
+  return /* @__PURE__ */ jsx140(Dialog, { onCloseRequest, size: "wide", title: false, children: /* @__PURE__ */ jsx140(
     ImageExportModal,
     {
       elementsSnapshot,
@@ -31108,14 +31519,14 @@ var ImageExportDialog = ({
 };
 
 // components/JSONExportDialog.tsx
-import React41 from "react";
+import React42 from "react";
 import { getFrame } from "@excalidraw/common";
 
 // components/Card.tsx
 import OpenColor3 from "open-color";
-import { jsx as jsx140 } from "react/jsx-runtime";
+import { jsx as jsx141 } from "react/jsx-runtime";
 var Card = ({ children, color }) => {
-  return /* @__PURE__ */ jsx140(
+  return /* @__PURE__ */ jsx141(
     "div",
     {
       className: "Card",
@@ -31130,7 +31541,7 @@ var Card = ({ children, color }) => {
 };
 
 // components/JSONExportDialog.tsx
-import { Fragment as Fragment23, jsx as jsx141, jsxs as jsxs76 } from "react/jsx-runtime";
+import { Fragment as Fragment24, jsx as jsx142, jsxs as jsxs77 } from "react/jsx-runtime";
 var JSONExportModal = ({
   elements,
   appState,
@@ -31142,15 +31553,15 @@ var JSONExportModal = ({
   onCloseRequest
 }) => {
   const { onExportToBackend } = exportOpts;
-  return /* @__PURE__ */ jsx141("div", { className: "ExportDialog ExportDialog--json", children: /* @__PURE__ */ jsxs76("div", { className: "ExportDialog-cards", children: [
-    exportOpts.saveFileToDisk && /* @__PURE__ */ jsxs76(Card, { color: "lime", children: [
-      /* @__PURE__ */ jsx141("div", { className: "Card-icon", children: exportToFileIcon }),
-      /* @__PURE__ */ jsx141("h2", { children: t("exportDialog.disk_title") }),
-      /* @__PURE__ */ jsxs76("div", { className: "Card-details", children: [
+  return /* @__PURE__ */ jsx142("div", { className: "ExportDialog ExportDialog--json", children: /* @__PURE__ */ jsxs77("div", { className: "ExportDialog-cards", children: [
+    exportOpts.saveFileToDisk && /* @__PURE__ */ jsxs77(Card, { color: "lime", children: [
+      /* @__PURE__ */ jsx142("div", { className: "Card-icon", children: exportToFileIcon }),
+      /* @__PURE__ */ jsx142("h2", { children: t("exportDialog.disk_title") }),
+      /* @__PURE__ */ jsxs77("div", { className: "Card-details", children: [
         t("exportDialog.disk_details"),
         !nativeFileSystemSupported && actionManager.renderAction("changeProjectName")
       ] }),
-      /* @__PURE__ */ jsx141(
+      /* @__PURE__ */ jsx142(
         ToolButton,
         {
           className: "Card-button",
@@ -31164,11 +31575,11 @@ var JSONExportModal = ({
         }
       )
     ] }),
-    onExportToBackend && /* @__PURE__ */ jsxs76(Card, { color: "pink", children: [
-      /* @__PURE__ */ jsx141("div", { className: "Card-icon", children: LinkIcon }),
-      /* @__PURE__ */ jsx141("h2", { children: t("exportDialog.link_title") }),
-      /* @__PURE__ */ jsx141("div", { className: "Card-details", children: t("exportDialog.link_details") }),
-      /* @__PURE__ */ jsx141(
+    onExportToBackend && /* @__PURE__ */ jsxs77(Card, { color: "pink", children: [
+      /* @__PURE__ */ jsx142("div", { className: "Card-icon", children: LinkIcon }),
+      /* @__PURE__ */ jsx142("h2", { children: t("exportDialog.link_title") }),
+      /* @__PURE__ */ jsx142("div", { className: "Card-details", children: t("exportDialog.link_details") }),
+      /* @__PURE__ */ jsx142(
         ToolButton,
         {
           className: "Card-button",
@@ -31200,10 +31611,10 @@ var JSONExportDialog = ({
   canvas,
   setAppState
 }) => {
-  const handleClose = React41.useCallback(() => {
+  const handleClose = React42.useCallback(() => {
     setAppState({ openDialog: null });
   }, [setAppState]);
-  return /* @__PURE__ */ jsx141(Fragment23, { children: appState.openDialog?.name === "jsonExport" && /* @__PURE__ */ jsx141(Dialog, { onCloseRequest: handleClose, title: t("buttons.export"), children: /* @__PURE__ */ jsx141(
+  return /* @__PURE__ */ jsx142(Fragment24, { children: appState.openDialog?.name === "jsonExport" && /* @__PURE__ */ jsx142(Dialog, { onCloseRequest: handleClose, title: t("buttons.export"), children: /* @__PURE__ */ jsx142(
     JSONExportModal,
     {
       elements,
@@ -31220,10 +31631,10 @@ var JSONExportDialog = ({
 
 // components/LaserPointerButton.tsx
 import clsx58 from "clsx";
-import { jsx as jsx142, jsxs as jsxs77 } from "react/jsx-runtime";
+import { jsx as jsx143, jsxs as jsxs78 } from "react/jsx-runtime";
 var DEFAULT_SIZE3 = "small";
 var LaserPointerButton = (props) => {
-  return /* @__PURE__ */ jsxs77(
+  return /* @__PURE__ */ jsxs78(
     "label",
     {
       className: clsx58(
@@ -31235,7 +31646,7 @@ var LaserPointerButton = (props) => {
       ),
       title: `${props.title}`,
       children: [
-        /* @__PURE__ */ jsx142(
+        /* @__PURE__ */ jsx143(
           "input",
           {
             className: "ToolIcon_type_checkbox",
@@ -31247,34 +31658,34 @@ var LaserPointerButton = (props) => {
             "data-testid": "toolbar-LaserPointer"
           }
         ),
-        /* @__PURE__ */ jsx142("div", { className: "ToolIcon__icon", children: laserPointerToolIcon })
+        /* @__PURE__ */ jsx143("div", { className: "ToolIcon__icon", children: laserPointerToolIcon })
       ]
     }
   );
 };
 
 // components/LayerUI.tsx
-import { Fragment as Fragment24, jsx as jsx143, jsxs as jsxs78 } from "react/jsx-runtime";
+import { Fragment as Fragment25, jsx as jsx144, jsxs as jsxs79 } from "react/jsx-runtime";
 var DefaultMainMenu = ({ UIOptions }) => {
-  return /* @__PURE__ */ jsxs78(MainMenu_default, { __fallback: true, children: [
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.LoadScene, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.SaveToActiveFile, {}),
-    UIOptions.canvasActions.export && /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.Export, {}),
-    UIOptions.canvasActions.saveAsImage && /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.SaveAsImage, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.SearchMenu, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.Help, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.ClearCanvas, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.Separator, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.Group, { title: "Excalidraw links", children: /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.Socials, {}) }),
-    /* @__PURE__ */ jsx143(MainMenu_default.Separator, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.ToggleTheme, {}),
-    /* @__PURE__ */ jsx143(MainMenu_default.DefaultItems.ChangeCanvasBackground, {})
+  return /* @__PURE__ */ jsxs79(MainMenu_default, { __fallback: true, children: [
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.LoadScene, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.SaveToActiveFile, {}),
+    UIOptions.canvasActions.export && /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.Export, {}),
+    UIOptions.canvasActions.saveAsImage && /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.SaveAsImage, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.SearchMenu, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.Help, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.ClearCanvas, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.Separator, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.Group, { title: "Excalidraw links", children: /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.Socials, {}) }),
+    /* @__PURE__ */ jsx144(MainMenu_default.Separator, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.ToggleTheme, {}),
+    /* @__PURE__ */ jsx144(MainMenu_default.DefaultItems.ChangeCanvasBackground, {})
   ] });
 };
 var DefaultOverwriteConfirmDialog = () => {
-  return /* @__PURE__ */ jsxs78(OverwriteConfirmDialog, { __fallback: true, children: [
-    /* @__PURE__ */ jsx143(OverwriteConfirmDialog.Actions.SaveToDisk, {}),
-    /* @__PURE__ */ jsx143(OverwriteConfirmDialog.Actions.ExportToImage, {})
+  return /* @__PURE__ */ jsxs79(OverwriteConfirmDialog, { __fallback: true, children: [
+    /* @__PURE__ */ jsx144(OverwriteConfirmDialog.Actions.SaveToDisk, {}),
+    /* @__PURE__ */ jsx144(OverwriteConfirmDialog.Actions.ExportToImage, {})
   ] });
 };
 var LayerUI = ({
@@ -31324,7 +31735,7 @@ var LayerUI = ({
     if (!UIOptions.canvasActions.export) {
       return null;
     }
-    return /* @__PURE__ */ jsx143(
+    return /* @__PURE__ */ jsx144(
       JSONExportDialog,
       {
         elements,
@@ -31341,7 +31752,7 @@ var LayerUI = ({
     if (!UIOptions.canvasActions.saveAsImage || appState.openDialog?.name !== "imageExport") {
       return null;
     }
-    return /* @__PURE__ */ jsx143(
+    return /* @__PURE__ */ jsx144(
       ImageExportDialog,
       {
         elements,
@@ -31354,20 +31765,20 @@ var LayerUI = ({
       }
     );
   };
-  const renderCanvasActions = () => /* @__PURE__ */ jsxs78("div", { style: { position: "relative" }, children: [
-    /* @__PURE__ */ jsx143(tunnels.MainMenuTunnel.Out, {}),
-    renderWelcomeScreen && /* @__PURE__ */ jsx143(tunnels.WelcomeScreenMenuHintTunnel.Out, {})
+  const renderCanvasActions = () => /* @__PURE__ */ jsxs79("div", { style: { position: "relative" }, children: [
+    /* @__PURE__ */ jsx144(tunnels.MainMenuTunnel.Out, {}),
+    renderWelcomeScreen && /* @__PURE__ */ jsx144(tunnels.WelcomeScreenMenuHintTunnel.Out, {})
   ] });
   const renderSelectedShapeActions = () => {
     const isCompactMode = isCompactStylesPanel;
-    return /* @__PURE__ */ jsx143(
+    return /* @__PURE__ */ jsx144(
       Section,
       {
         heading: "selectedShapeActions",
         className: clsx59("selected-shape-actions zen-mode-transition", {
           "transition-left": appState.zenModeEnabled
         }),
-        children: isCompactMode ? /* @__PURE__ */ jsx143(
+        children: isCompactMode ? /* @__PURE__ */ jsx144(
           Island,
           {
             className: clsx59("compact-shape-actions-island"),
@@ -31377,7 +31788,7 @@ var LayerUI = ({
               // approximate height of hamburgerMenu + footer
               maxHeight: `${appState.height - 166}px`
             },
-            children: /* @__PURE__ */ jsx143(
+            children: /* @__PURE__ */ jsx144(
               CompactShapeActions,
               {
                 appState,
@@ -31388,7 +31799,7 @@ var LayerUI = ({
               }
             )
           }
-        ) : /* @__PURE__ */ jsx143(
+        ) : /* @__PURE__ */ jsx144(
           Island,
           {
             className: CLASSES8.SHAPE_ACTIONS_MENU,
@@ -31398,7 +31809,7 @@ var LayerUI = ({
               // approximate height of hamburgerMenu + footer
               maxHeight: `${appState.height - 166}px`
             },
-            children: /* @__PURE__ */ jsx143(
+            children: /* @__PURE__ */ jsx144(
               SelectedShapeActions,
               {
                 appState,
@@ -31418,15 +31829,15 @@ var LayerUI = ({
       elements
     );
     const shouldShowStats = appState.stats.open && !appState.zenModeEnabled && !appState.viewModeEnabled && appState.openDialog?.name !== "elementLinkSelector";
-    return /* @__PURE__ */ jsx143(FixedSideContainer, { side: "top", children: /* @__PURE__ */ jsxs78("div", { className: "App-menu App-menu_top", children: [
-      /* @__PURE__ */ jsxs78(
+    return /* @__PURE__ */ jsx144(FixedSideContainer, { side: "top", children: /* @__PURE__ */ jsxs79("div", { className: "App-menu App-menu_top", children: [
+      /* @__PURE__ */ jsxs79(
         Stack_default.Col,
         {
           gap: spacing.menuTopGap,
           className: clsx59("App-menu_top__left"),
           children: [
             renderCanvasActions(),
-            /* @__PURE__ */ jsx143(
+            /* @__PURE__ */ jsx144(
               "div",
               {
                 className: clsx59("selected-shape-actions-container", {
@@ -31438,9 +31849,9 @@ var LayerUI = ({
           ]
         }
       ),
-      !appState.viewModeEnabled && appState.openDialog?.name !== "elementLinkSelector" && /* @__PURE__ */ jsx143(Section, { heading: "shapes", className: "shapes-section", children: (heading) => /* @__PURE__ */ jsxs78("div", { style: { position: "relative" }, children: [
-        renderWelcomeScreen && /* @__PURE__ */ jsx143(tunnels.WelcomeScreenToolbarHintTunnel.Out, {}),
-        /* @__PURE__ */ jsx143(Stack_default.Col, { gap: spacing.toolbarColGap, align: "start", children: /* @__PURE__ */ jsxs78(
+      !appState.viewModeEnabled && appState.openDialog?.name !== "elementLinkSelector" && /* @__PURE__ */ jsx144(Section, { heading: "shapes", className: "shapes-section", children: (heading) => /* @__PURE__ */ jsxs79("div", { style: { position: "relative" }, children: [
+        renderWelcomeScreen && /* @__PURE__ */ jsx144(tunnels.WelcomeScreenToolbarHintTunnel.Out, {}),
+        /* @__PURE__ */ jsx144(Stack_default.Col, { gap: spacing.toolbarColGap, align: "start", children: /* @__PURE__ */ jsxs79(
           Stack_default.Row,
           {
             gap: spacing.toolbarRowGap,
@@ -31448,7 +31859,7 @@ var LayerUI = ({
               "zen-mode": appState.zenModeEnabled
             }),
             children: [
-              /* @__PURE__ */ jsxs78(
+              /* @__PURE__ */ jsxs79(
                 Island,
                 {
                   padding: spacing.islandPadding,
@@ -31457,7 +31868,7 @@ var LayerUI = ({
                     "App-toolbar--compact": isCompactStylesPanel
                   }),
                   children: [
-                    /* @__PURE__ */ jsx143(
+                    /* @__PURE__ */ jsx144(
                       HintViewer,
                       {
                         appState,
@@ -31467,8 +31878,8 @@ var LayerUI = ({
                       }
                     ),
                     heading,
-                    /* @__PURE__ */ jsxs78(Stack_default.Row, { gap: spacing.toolbarInnerRowGap, children: [
-                      /* @__PURE__ */ jsx143(
+                    /* @__PURE__ */ jsxs79(Stack_default.Row, { gap: spacing.toolbarInnerRowGap, children: [
+                      /* @__PURE__ */ jsx144(
                         PenModeButton,
                         {
                           zenModeEnabled: appState.zenModeEnabled,
@@ -31478,7 +31889,7 @@ var LayerUI = ({
                           penDetected: appState.penDetected
                         }
                       ),
-                      /* @__PURE__ */ jsx143(
+                      /* @__PURE__ */ jsx144(
                         LockButton,
                         {
                           checked: appState.activeTool.locked,
@@ -31486,8 +31897,8 @@ var LayerUI = ({
                           title: t("toolBar.lock")
                         }
                       ),
-                      /* @__PURE__ */ jsx143("div", { className: "App-toolbar__divider" }),
-                      /* @__PURE__ */ jsx143(
+                      /* @__PURE__ */ jsx144("div", { className: "App-toolbar__divider" }),
+                      /* @__PURE__ */ jsx144(
                         HandButton,
                         {
                           checked: isHandToolActive(appState),
@@ -31496,7 +31907,7 @@ var LayerUI = ({
                           isMobile: true
                         }
                       ),
-                      /* @__PURE__ */ jsx143(
+                      /* @__PURE__ */ jsx144(
                         ShapesSwitcher,
                         {
                           setAppState,
@@ -31509,7 +31920,7 @@ var LayerUI = ({
                   ]
                 }
               ),
-              isCollaborating && /* @__PURE__ */ jsx143(
+              isCollaborating && /* @__PURE__ */ jsx144(
                 Island,
                 {
                   style: {
@@ -31517,7 +31928,7 @@ var LayerUI = ({
                     alignSelf: "center",
                     height: "fit-content"
                   },
-                  children: /* @__PURE__ */ jsx143(
+                  children: /* @__PURE__ */ jsx144(
                     LaserPointerButton,
                     {
                       title: t("toolBar.laser"),
@@ -31532,7 +31943,7 @@ var LayerUI = ({
           }
         ) })
       ] }) }),
-      /* @__PURE__ */ jsxs78(
+      /* @__PURE__ */ jsxs79(
         "div",
         {
           className: clsx59(
@@ -31543,7 +31954,7 @@ var LayerUI = ({
             }
           ),
           children: [
-            appState.collaborators.size > 0 && /* @__PURE__ */ jsx143(
+            appState.collaborators.size > 0 && /* @__PURE__ */ jsx144(
               UserList,
               {
                 collaborators: appState.collaborators,
@@ -31555,8 +31966,8 @@ var LayerUI = ({
               appState
             ),
             !appState.viewModeEnabled && appState.openDialog?.name !== "elementLinkSelector" && // hide button when sidebar docked
-            (!isSidebarDocked || appState.openSidebar?.name !== DEFAULT_SIDEBAR6.name) && /* @__PURE__ */ jsx143(tunnels.DefaultSidebarTriggerTunnel.Out, {}),
-            shouldShowStats && /* @__PURE__ */ jsx143(
+            (!isSidebarDocked || appState.openSidebar?.name !== DEFAULT_SIDEBAR6.name) && /* @__PURE__ */ jsx144(tunnels.DefaultSidebarTriggerTunnel.Out, {}),
+            shouldShowStats && /* @__PURE__ */ jsx144(
               Stats,
               {
                 app,
@@ -31572,7 +31983,7 @@ var LayerUI = ({
     ] }) });
   };
   const renderSidebars = () => {
-    return /* @__PURE__ */ jsx143(
+    return /* @__PURE__ */ jsx144(
       DefaultSidebar,
       {
         __fallback: true,
@@ -31587,10 +31998,10 @@ var LayerUI = ({
     );
   };
   const isSidebarDocked = useAtomValue(isSidebarDockedAtom);
-  const layerUIJSX = /* @__PURE__ */ jsxs78(Fragment24, { children: [
+  const layerUIJSX = /* @__PURE__ */ jsxs79(Fragment25, { children: [
     children,
-    /* @__PURE__ */ jsx143(DefaultMainMenu, { UIOptions }),
-    /* @__PURE__ */ jsx143(
+    /* @__PURE__ */ jsx144(DefaultMainMenu, { UIOptions }),
+    /* @__PURE__ */ jsx144(
       DefaultSidebar.Trigger,
       {
         __fallback: true,
@@ -31608,11 +32019,11 @@ var LayerUI = ({
         tab: DEFAULT_SIDEBAR6.defaultTab
       }
     ),
-    /* @__PURE__ */ jsx143(DefaultOverwriteConfirmDialog, {}),
-    appState.openDialog?.name === "ttd" && /* @__PURE__ */ jsx143(TTDDialog, { __fallback: true }),
-    appState.isLoading && /* @__PURE__ */ jsx143(LoadingMessage, { delay: 250 }),
-    appState.errorMessage && /* @__PURE__ */ jsx143(ErrorDialog, { onClose: () => setAppState({ errorMessage: null }), children: appState.errorMessage }),
-    eyeDropperState && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx143(
+    /* @__PURE__ */ jsx144(DefaultOverwriteConfirmDialog, {}),
+    appState.openDialog?.name === "ttd" && /* @__PURE__ */ jsx144(TTDDialog, { __fallback: true }),
+    appState.isLoading && /* @__PURE__ */ jsx144(LoadingMessage, { delay: 250 }),
+    appState.errorMessage && /* @__PURE__ */ jsx144(ErrorDialog, { onClose: () => setAppState({ errorMessage: null }), children: appState.errorMessage }),
+    eyeDropperState && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx144(
       EyeDropper,
       {
         colorPickerType: eyeDropperState.colorPickerType,
@@ -31647,7 +32058,7 @@ var LayerUI = ({
         }
       }
     ),
-    appState.openDialog?.name === "help" && /* @__PURE__ */ jsx143(
+    appState.openDialog?.name === "help" && /* @__PURE__ */ jsx144(
       HelpDialog,
       {
         onClose: () => {
@@ -31655,8 +32066,8 @@ var LayerUI = ({
         }
       }
     ),
-    /* @__PURE__ */ jsx143(ActiveConfirmDialog, {}),
-    appState.openDialog?.name === "elementLinkSelector" && /* @__PURE__ */ jsx143(
+    /* @__PURE__ */ jsx144(ActiveConfirmDialog, {}),
+    appState.openDialog?.name === "elementLinkSelector" && /* @__PURE__ */ jsx144(
       ElementLinkDialog_default,
       {
         sourceElementId: appState.openDialog.sourceElementId,
@@ -31670,10 +32081,10 @@ var LayerUI = ({
         generateLinkForSelection
       }
     ),
-    /* @__PURE__ */ jsx143(tunnels.OverwriteConfirmDialogTunnel.Out, {}),
+    /* @__PURE__ */ jsx144(tunnels.OverwriteConfirmDialogTunnel.Out, {}),
     renderImageExportDialog(),
     renderJSONExportDialog(),
-    appState.pasteDialog.shown && /* @__PURE__ */ jsx143(
+    appState.pasteDialog.shown && /* @__PURE__ */ jsx144(
       PasteChartDialog,
       {
         setAppState,
@@ -31683,7 +32094,7 @@ var LayerUI = ({
         })
       }
     ),
-    editorInterface.formFactor === "phone" && /* @__PURE__ */ jsx143(
+    editorInterface.formFactor === "phone" && /* @__PURE__ */ jsx144(
       MobileMenu,
       {
         app,
@@ -31702,16 +32113,16 @@ var LayerUI = ({
         UIOptions
       }
     ),
-    editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsxs78(Fragment24, { children: [
-      /* @__PURE__ */ jsxs78(
+    editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsxs79(Fragment25, { children: [
+      /* @__PURE__ */ jsxs79(
         "div",
         {
           className: "layer-ui__wrapper",
           style: appState.openSidebar && isSidebarDocked && editorInterface.canFitSidebar ? { width: `calc(100% - var(--right-sidebar-width))` } : {},
           children: [
-            renderWelcomeScreen && /* @__PURE__ */ jsx143(tunnels.WelcomeScreenCenterTunnel.Out, {}),
+            renderWelcomeScreen && /* @__PURE__ */ jsx144(tunnels.WelcomeScreenCenterTunnel.Out, {}),
             renderFixedSideContainer(),
-            /* @__PURE__ */ jsx143(
+            /* @__PURE__ */ jsx144(
               Footer_default,
               {
                 appState,
@@ -31720,7 +32131,7 @@ var LayerUI = ({
                 renderWelcomeScreen
               }
             ),
-            appState.scrolledOutside && /* @__PURE__ */ jsx143(
+            appState.scrolledOutside && /* @__PURE__ */ jsx144(
               "button",
               {
                 type: "button",
@@ -31739,7 +32150,7 @@ var LayerUI = ({
       renderSidebars()
     ] })
   ] });
-  return /* @__PURE__ */ jsx143(UIAppStateContext.Provider, { value: appState, children: /* @__PURE__ */ jsx143(TunnelsJotaiProvider, { children: /* @__PURE__ */ jsx143(TunnelsContext.Provider, { value: tunnels, children: layerUIJSX }) }) });
+  return /* @__PURE__ */ jsx144(UIAppStateContext.Provider, { value: appState, children: /* @__PURE__ */ jsx144(TunnelsJotaiProvider, { children: /* @__PURE__ */ jsx144(TunnelsContext.Provider, { value: tunnels, children: layerUIJSX }) }) });
 };
 var stripIrrelevantAppStateProps = (appState) => {
   const { startBoundElement, cursorButton, scrollX, scrollY, ...ret } = appState;
@@ -31762,14 +32173,14 @@ var areEqual2 = (prevProps, nextProps) => {
     }
   ) && isShallowEqual6(prev, next);
 };
-var LayerUI_default = React42.memo(LayerUI, areEqual2);
+var LayerUI_default = React43.memo(LayerUI, areEqual2);
 
 // components/MagicButton.tsx
 import clsx60 from "clsx";
-import { jsx as jsx144, jsxs as jsxs79 } from "react/jsx-runtime";
+import { jsx as jsx145, jsxs as jsxs80 } from "react/jsx-runtime";
 var DEFAULT_SIZE4 = "small";
 var ElementCanvasButton = (props) => {
-  return /* @__PURE__ */ jsxs79(
+  return /* @__PURE__ */ jsxs80(
     "label",
     {
       className: clsx60(
@@ -31781,7 +32192,7 @@ var ElementCanvasButton = (props) => {
       ),
       title: `${props.title}`,
       children: [
-        /* @__PURE__ */ jsx144(
+        /* @__PURE__ */ jsx145(
           "input",
           {
             className: "ToolIcon_type_checkbox",
@@ -31792,17 +32203,17 @@ var ElementCanvasButton = (props) => {
             "aria-label": props.title
           }
         ),
-        /* @__PURE__ */ jsx144("div", { className: "ToolIcon__icon", children: props.icon })
+        /* @__PURE__ */ jsx145("div", { className: "ToolIcon__icon", children: props.icon })
       ]
     }
   );
 };
 
 // components/SVGLayer.tsx
-import { useEffect as useEffect42, useRef as useRef37 } from "react";
-import { jsx as jsx145 } from "react/jsx-runtime";
+import { useEffect as useEffect42, useRef as useRef38 } from "react";
+import { jsx as jsx146 } from "react/jsx-runtime";
 var SVGLayer = ({ trails }) => {
-  const svgRef = useRef37(null);
+  const svgRef = useRef38(null);
   useEffect42(() => {
     if (svgRef.current) {
       for (const trail of trails) {
@@ -31815,11 +32226,11 @@ var SVGLayer = ({ trails }) => {
       }
     };
   }, trails);
-  return /* @__PURE__ */ jsx145("div", { className: "SVGLayer", children: /* @__PURE__ */ jsx145("svg", { ref: svgRef }) });
+  return /* @__PURE__ */ jsx146("div", { className: "SVGLayer", children: /* @__PURE__ */ jsx146("svg", { ref: svgRef }) });
 };
 
 // components/canvases/InteractiveCanvas.tsx
-import React43, { useEffect as useEffect43, useRef as useRef38 } from "react";
+import React44, { useEffect as useEffect43, useRef as useRef39 } from "react";
 import {
   CURSOR_TYPE as CURSOR_TYPE3,
   isShallowEqual as isShallowEqual7,
@@ -33168,11 +33579,11 @@ var renderInteractiveScene = (renderConfig) => {
 };
 
 // components/canvases/InteractiveCanvas.tsx
-import { jsx as jsx146 } from "react/jsx-runtime";
+import { jsx as jsx147 } from "react/jsx-runtime";
 var INTERACTIVE_SCENE_ANIMATION_KEY = "animateInteractiveScene";
 var InteractiveCanvas = (props) => {
-  const isComponentMounted = useRef38(false);
-  const rendererParams = useRef38(null);
+  const isComponentMounted = useRef39(false);
+  const rendererParams = useRef39(null);
   useEffect43(() => {
     if (!isComponentMounted.current) {
       isComponentMounted.current = true;
@@ -33264,7 +33675,7 @@ var InteractiveCanvas = (props) => {
       );
     }
   });
-  return /* @__PURE__ */ jsx146(
+  return /* @__PURE__ */ jsx147(
     "canvas",
     {
       className: "excalidraw__canvas interactive",
@@ -33339,15 +33750,15 @@ var areEqual3 = (prevProps, nextProps) => {
     getRelevantAppStateProps(nextProps.appState)
   );
 };
-var InteractiveCanvas_default = React43.memo(InteractiveCanvas, areEqual3);
+var InteractiveCanvas_default = React44.memo(InteractiveCanvas, areEqual3);
 
 // components/canvases/StaticCanvas.tsx
-import React44, { useEffect as useEffect44, useRef as useRef39 } from "react";
+import React45, { useEffect as useEffect44, useRef as useRef40 } from "react";
 import { isShallowEqual as isShallowEqual8 } from "@excalidraw/common";
-import { jsx as jsx147 } from "react/jsx-runtime";
+import { jsx as jsx148 } from "react/jsx-runtime";
 var StaticCanvas = (props) => {
-  const wrapperRef = useRef39(null);
-  const isComponentMounted = useRef39(false);
+  const wrapperRef = useRef40(null);
+  const isComponentMounted = useRef40(false);
   useEffect44(() => {
     props.canvas.style.width = `${props.appState.width}px`;
     props.canvas.style.height = `${props.appState.height}px`;
@@ -33379,7 +33790,7 @@ var StaticCanvas = (props) => {
       isRenderThrottlingEnabled()
     );
   });
-  return /* @__PURE__ */ jsx147("div", { className: "excalidraw__canvas-wrapper", ref: wrapperRef });
+  return /* @__PURE__ */ jsx148("div", { className: "excalidraw__canvas-wrapper", ref: wrapperRef });
 };
 var getRelevantAppStateProps2 = (appState) => {
   const relevantAppStateProps = {
@@ -33424,10 +33835,10 @@ var areEqual4 = (prevProps, nextProps) => {
     getRelevantAppStateProps2(nextProps.appState)
   ) && isShallowEqual8(prevProps.renderConfig, nextProps.renderConfig);
 };
-var StaticCanvas_default = React44.memo(StaticCanvas, areEqual4);
+var StaticCanvas_default = React45.memo(StaticCanvas, areEqual4);
 
 // components/canvases/NewElementCanvas.tsx
-import { useEffect as useEffect45, useRef as useRef40 } from "react";
+import { useEffect as useEffect45, useRef as useRef41 } from "react";
 
 // renderer/renderNewElementScene.ts
 import { throttleRAF as throttleRAF2 } from "@excalidraw/common";
@@ -33501,9 +33912,9 @@ var renderNewElementScene = (renderConfig, throttle5) => {
 };
 
 // components/canvases/NewElementCanvas.tsx
-import { jsx as jsx148 } from "react/jsx-runtime";
+import { jsx as jsx149 } from "react/jsx-runtime";
 var NewElementCanvas = (props) => {
-  const canvasRef = useRef40(null);
+  const canvasRef = useRef41(null);
   useEffect45(() => {
     if (!canvasRef.current) {
       return;
@@ -33522,7 +33933,7 @@ var NewElementCanvas = (props) => {
       isRenderThrottlingEnabled()
     );
   });
-  return /* @__PURE__ */ jsx148(
+  return /* @__PURE__ */ jsx149(
     "canvas",
     {
       className: "excalidraw__canvas",
@@ -33539,8 +33950,8 @@ var NewElementCanvas = (props) => {
 var NewElementCanvas_default = NewElementCanvas;
 
 // components/Toast.tsx
-import { useCallback as useCallback15, useEffect as useEffect46, useRef as useRef41 } from "react";
-import { jsx as jsx149, jsxs as jsxs80 } from "react/jsx-runtime";
+import { useCallback as useCallback15, useEffect as useEffect46, useRef as useRef42 } from "react";
+import { jsx as jsx150, jsxs as jsxs81 } from "react/jsx-runtime";
 var DEFAULT_TOAST_TIMEOUT = 5e3;
 var Toast = ({
   message,
@@ -33550,7 +33961,7 @@ var Toast = ({
   duration = DEFAULT_TOAST_TIMEOUT,
   style
 }) => {
-  const timerRef = useRef41(0);
+  const timerRef = useRef42(0);
   const shouldAutoClose = duration !== Infinity;
   const scheduleTimeout = useCallback15(() => {
     if (!shouldAutoClose) {
@@ -33567,7 +33978,7 @@ var Toast = ({
   }, [scheduleTimeout, message, duration, shouldAutoClose]);
   const onMouseEnter = shouldAutoClose ? () => clearTimeout(timerRef?.current) : void 0;
   const onMouseLeave = shouldAutoClose ? scheduleTimeout : void 0;
-  return /* @__PURE__ */ jsxs80(
+  return /* @__PURE__ */ jsxs81(
     "div",
     {
       className: "Toast",
@@ -33575,8 +33986,8 @@ var Toast = ({
       onMouseLeave,
       style,
       children: [
-        /* @__PURE__ */ jsx149("p", { className: "Toast__message", children: message }),
-        closable && /* @__PURE__ */ jsx149(
+        /* @__PURE__ */ jsx150("p", { className: "Toast__message", children: message }),
+        closable && /* @__PURE__ */ jsx150(
           ToolButton,
           {
             icon: CloseIcon,
@@ -33599,7 +34010,7 @@ import {
 } from "@excalidraw/element";
 import { sceneCoordsToViewportCoords as sceneCoordsToViewportCoords6 } from "@excalidraw/common";
 import { flushSync as flushSync2 } from "react-dom";
-import { jsx as jsx150 } from "react/jsx-runtime";
+import { jsx as jsx151 } from "react/jsx-runtime";
 var UnlockPopup = ({
   app,
   activeLockedId
@@ -33614,7 +34025,7 @@ var UnlockPopup = ({
     { sceneX: x, sceneY: y },
     app.state
   );
-  return /* @__PURE__ */ jsx150(
+  return /* @__PURE__ */ jsx151(
     "div",
     {
       className: "UnlockPopup",
@@ -33647,9 +34058,9 @@ var UnlockPopup = ({
 var UnlockPopup_default = UnlockPopup;
 
 // components/App.tsx
-import { Fragment as Fragment25, jsx as jsx151, jsxs as jsxs81 } from "react/jsx-runtime";
-var AppContext = React45.createContext(null);
-var AppPropsContext = React45.createContext(null);
+import { Fragment as Fragment26, jsx as jsx152, jsxs as jsxs82 } from "react/jsx-runtime";
+var AppContext = React46.createContext(null);
+var AppPropsContext = React46.createContext(null);
 var editorInterfaceContextInitialValue = {
   formFactor: "desktop",
   desktopUIMode: "full",
@@ -33660,15 +34071,15 @@ var editorInterfaceContextInitialValue = {
   canFitSidebar: false,
   isLandscape: true
 };
-var EditorInterfaceContext = React45.createContext(
+var EditorInterfaceContext = React46.createContext(
   editorInterfaceContextInitialValue
 );
 EditorInterfaceContext.displayName = "EditorInterfaceContext";
-var ExcalidrawContainerContext = React45.createContext({ container: null, id: null });
+var ExcalidrawContainerContext = React46.createContext({ container: null, id: null });
 ExcalidrawContainerContext.displayName = "ExcalidrawContainerContext";
-var ExcalidrawElementsContext = React45.createContext([]);
+var ExcalidrawElementsContext = React46.createContext([]);
 ExcalidrawElementsContext.displayName = "ExcalidrawElementsContext";
-var ExcalidrawAppStateContext = React45.createContext({
+var ExcalidrawAppStateContext = React46.createContext({
   ...getDefaultAppState(),
   width: 0,
   height: 0,
@@ -33676,11 +34087,11 @@ var ExcalidrawAppStateContext = React45.createContext({
   offsetTop: 0
 });
 ExcalidrawAppStateContext.displayName = "ExcalidrawAppStateContext";
-var ExcalidrawSetAppStateContext = React45.createContext(() => {
+var ExcalidrawSetAppStateContext = React46.createContext(() => {
   console.warn("Uninitialized ExcalidrawSetAppStateContext context!");
 });
 ExcalidrawSetAppStateContext.displayName = "ExcalidrawSetAppStateContext";
-var ExcalidrawActionManagerContext = React45.createContext(
+var ExcalidrawActionManagerContext = React46.createContext(
   null
 );
 ExcalidrawActionManagerContext.displayName = "ExcalidrawActionManagerContext";
@@ -33713,7 +34124,7 @@ var gesture = {
   initialDistance: null,
   initialScale: null
 };
-var App = class _App extends React45.Component {
+var App = class _App extends React46.Component {
   constructor(props) {
     super(props);
     __publicField(this, "canvas");
@@ -33725,7 +34136,7 @@ var App = class _App extends React45.Component {
     __publicField(this, "stylesPanelMode", deriveStylesPanelMode2(
       editorInterfaceContextInitialValue
     ));
-    __publicField(this, "excalidrawContainerRef", React45.createRef());
+    __publicField(this, "excalidrawContainerRef", React46.createRef());
     __publicField(this, "scene");
     __publicField(this, "fonts");
     __publicField(this, "renderer");
@@ -33906,7 +34317,7 @@ var App = class _App extends React45.Component {
         const frameName = getFrameLikeTitle(f);
         if (f.id === this.state.editingFrame) {
           const frameNameInEdit = frameName;
-          frameNameJSX = /* @__PURE__ */ jsx151(
+          frameNameJSX = /* @__PURE__ */ jsx152(
             "input",
             {
               autoFocus: true,
@@ -33949,7 +34360,7 @@ var App = class _App extends React45.Component {
         } else {
           frameNameJSX = frameName;
         }
-        return /* @__PURE__ */ jsx151(
+        return /* @__PURE__ */ jsx152(
           "div",
           {
             id: this.getFrameNameDOMId(f),
@@ -37376,6 +37787,40 @@ var App = class _App extends React45.Component {
         height: placeholderSize
       });
     });
+    __publicField(this, "newVideoPlaceholder", ({
+      sceneX,
+      sceneY,
+      addToFrameUnderCursor = true
+    }) => {
+      const [gridX, gridY] = getGridPoint2(
+        sceneX,
+        sceneY,
+        this.lastPointerDownEvent?.[KEYS54.CTRL_OR_CMD] ? null : this.getEffectiveGridSize()
+      );
+      const topLayerFrame = addToFrameUnderCursor ? this.getTopLayerFrameAtSceneCoords({
+        x: gridX,
+        y: gridY
+      }) : null;
+      const placeholderWidth = 320;
+      const placeholderHeight = 180;
+      return newEmbeddableElement({
+        type: "embeddable",
+        strokeColor: "transparent",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 0,
+        strokeStyle: "solid",
+        roughness: 0,
+        roundness: null,
+        opacity: 100,
+        locked: false,
+        frameId: topLayerFrame ? topLayerFrame.id : null,
+        x: gridX - placeholderWidth / 2,
+        y: gridY - placeholderHeight / 2,
+        width: placeholderWidth,
+        height: placeholderHeight
+      });
+    });
     __publicField(this, "handleLinearElementOnPointerDown", (event, elementType, pointerDownState) => {
       if (event.ctrlKey) {
         flushSync3(() => {
@@ -37998,6 +38443,112 @@ var App = class _App extends React45.Component {
         this.actionManager.executeAction(actionFinalize);
       });
     });
+    __publicField(this, "initializeVideo", async (placeholderElement, videoFile) => {
+      if (!isSupportedVideoFileType(videoFile.type)) {
+        throw new Error(t("errors.unsupportedFileType"));
+      }
+      const mimeType = videoFile.type;
+      setCursor(this.interactiveCanvas, "wait");
+      const fileId = await (this.props.generateIdForFile?.(
+        videoFile
+      ) || generateIdFromFile(videoFile));
+      if (!fileId) {
+        console.warn(
+          "Couldn't generate file id or the supplied `generateIdForFile` didn't resolve to one."
+        );
+        throw new Error(t("errors.imageInsertError"));
+      }
+      const MAX_VIDEO_FILE_BYTES = 300 * 1024 * 1024;
+      if (videoFile.size > MAX_VIDEO_FILE_BYTES) {
+        throw new Error(
+          t("errors.fileTooBig", {
+            maxSize: `${Math.trunc(MAX_VIDEO_FILE_BYTES / 1024 / 1024)}MB`
+          })
+        );
+      }
+      const dataURL = this.files[fileId]?.dataURL || await getDataURL(videoFile);
+      const videoDimensions = await new Promise((resolve) => {
+        const video = document.createElement("video");
+        video.onloadedmetadata = () => {
+          resolve({ width: video.videoWidth, height: video.videoHeight });
+        };
+        video.onerror = () => {
+          resolve({
+            width: placeholderElement.width,
+            height: placeholderElement.height
+          });
+        };
+        video.src = dataURL;
+      });
+      const aspectRatio = videoDimensions.width / videoDimensions.height;
+      const baseWidth = placeholderElement.width;
+      const newWidth = baseWidth;
+      const newHeight = baseWidth / aspectRatio;
+      this.addMissingFiles([
+        {
+          mimeType,
+          id: fileId,
+          dataURL,
+          created: Date.now(),
+          lastRetrieved: Date.now(),
+          filename: videoFile.name
+        }
+      ]);
+      const updatedElement = newElementWith11(placeholderElement, {
+        fileId,
+        status: "saved",
+        width: newWidth,
+        height: newHeight,
+        // Center the element at the same position
+        y: placeholderElement.y - (newHeight - placeholderElement.height) / 2
+      });
+      resetCursor(this.interactiveCanvas);
+      return updatedElement;
+    });
+    __publicField(this, "insertVideos", async (videoFiles, sceneX, sceneY) => {
+      const gridPadding = 50 / this.state.zoom.value;
+      const placeholders = positionElementsOnGrid(
+        videoFiles.map(() => this.newVideoPlaceholder({ sceneX, sceneY })),
+        sceneX,
+        sceneY,
+        gridPadding
+      );
+      placeholders.forEach((el) => this.scene.insertElement(el));
+      const initialized = await Promise.all(
+        placeholders.map(async (placeholder, i) => {
+          try {
+            return await this.initializeVideo(placeholder, videoFiles[i]);
+          } catch (error) {
+            this.setState({
+              errorMessage: error.message || t("errors.imageInsertError")
+            });
+            return newElementWith11(placeholder, { isDeleted: true });
+          }
+        })
+      );
+      const initializedMap = arrayToMap27(initialized);
+      const positioned = positionElementsOnGrid(
+        initialized.filter((el) => !el.isDeleted),
+        sceneX,
+        sceneY,
+        gridPadding
+      );
+      const positionedMap = arrayToMap27(positioned);
+      const nextElements = this.scene.getElementsIncludingDeleted().map((el) => positionedMap.get(el.id) ?? initializedMap.get(el.id) ?? el);
+      this.updateScene({
+        appState: {
+          selectedElementIds: makeNextSelectedElementIds2(
+            Object.fromEntries(positioned.map((el) => [el.id, true])),
+            this.state
+          )
+        },
+        elements: nextElements,
+        captureUpdate: CaptureUpdateAction37.IMMEDIATELY
+      });
+      this.setState({}, () => {
+        this.actionManager.executeAction(actionFinalize);
+      });
+    });
     __publicField(this, "handleAppOnDrop", async (event) => {
       const { x: sceneX, y: sceneY } = viewportCoordsToSceneCoords3(
         event,
@@ -38035,6 +38586,10 @@ var App = class _App extends React45.Component {
       const imageFiles = fileItems.map((data) => data.file).filter((file2) => isSupportedImageFile(file2));
       if (imageFiles.length > 0 && this.isToolSupported("image")) {
         return this.insertImages(imageFiles, sceneX, sceneY);
+      }
+      const videoFiles = fileItems.map((data) => data.file).filter((file2) => isSupportedVideoFileType(file2?.type));
+      if (videoFiles.length > 0) {
+        return this.insertVideos(videoFiles, sceneX, sceneY);
       }
       const excalidrawLibrary_ids = dataTransferList.getData(
         MIME_TYPES9.excalidrawlibIds
@@ -39067,6 +39622,9 @@ var App = class _App extends React45.Component {
     }
   }
   isIframeLikeElementCenter(el, event, sceneX, sceneY) {
+    if (el && isLocalVideoEmbeddable3(el)) {
+      return false;
+    }
     return el && !event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey && (this.state.activeEmbeddable?.element !== el || this.state.activeEmbeddable?.state === "hover" || !this.state.activeEmbeddable) && sceneX >= el.x + el.width / 3 && sceneX <= el.x + 2 * el.width / 3 && sceneY >= el.y + el.height / 3 && sceneY <= el.y + 2 * el.height / 3;
   }
   renderEmbeddables() {
@@ -39074,9 +39632,9 @@ var App = class _App extends React45.Component {
     const normalizedWidth = this.state.width;
     const normalizedHeight = this.state.height;
     const embeddableElements = this.scene.getNonDeletedElements().filter(
-      (el) => isEmbeddableElement4(el) && this.embedsValidationStatus.get(el.id) === true || isIframeElement2(el)
+      (el) => isEmbeddableElement4(el) && (this.embedsValidationStatus.get(el.id) === true || isLocalVideoEmbeddable3(el)) || isIframeElement2(el)
     );
-    return /* @__PURE__ */ jsx151(Fragment25, { children: embeddableElements.map((el) => {
+    return /* @__PURE__ */ jsx152(Fragment26, { children: embeddableElements.map((el) => {
       const { x, y } = sceneCoordsToViewportCoords7(
         { sceneX: el.x, sceneY: el.y },
         this.state
@@ -39228,19 +39786,29 @@ var App = class _App extends React45.Component {
           };
         }
       } else {
-        src = getEmbedLink2(toValidURL2(el.link || ""));
+        if (isLocalVideoEmbeddable3(el) && this.files[el.fileId] && isSupportedVideoFileType(this.files[el.fileId].mimeType)) {
+          src = {
+            type: "localVideo",
+            dataURL: this.files[el.fileId].dataURL,
+            intrinsicSize: { w: el.width, h: el.height }
+          };
+        } else {
+          src = getEmbedLink2(toValidURL2(el.link || ""));
+        }
       }
       const isActive = this.state.activeEmbeddable?.element === el && this.state.activeEmbeddable?.state === "active";
       const isHovered = this.state.activeEmbeddable?.element === el && this.state.activeEmbeddable?.state === "hover";
-      return /* @__PURE__ */ jsx151(
+      const isLocalVideo = src?.type === "localVideo";
+      const shouldShow = isVisible || isLocalVideo;
+      return /* @__PURE__ */ jsx152(
         "div",
         {
           className: clsx61("excalidraw__embeddable-container", {
             "is-hovered": isHovered
           }),
           style: {
-            transform: isVisible ? `translate(${x - this.state.offsetLeft}px, ${y - this.state.offsetTop}px) scale(${scale})` : "none",
-            display: isVisible ? "block" : "none",
+            transform: shouldShow ? `translate(${x - this.state.offsetLeft}px, ${y - this.state.offsetTop}px) scale(${scale})` : "none",
+            display: shouldShow ? "block" : "none",
             opacity: getRenderOpacity(
               el,
               getContainingFrame3(el, this.scene.getNonDeletedElementsMap()),
@@ -39253,32 +39821,32 @@ var App = class _App extends React45.Component {
               el
             )}px`
           },
-          children: /* @__PURE__ */ jsxs81(
+          children: /* @__PURE__ */ jsxs82(
             "div",
             {
               className: "excalidraw__embeddable-container__inner",
               style: {
-                width: isVisible ? `${el.width}px` : 0,
-                height: isVisible ? `${el.height}px` : 0,
-                transform: isVisible ? `rotate(${el.angle}rad)` : "none",
+                width: shouldShow ? `${el.width}px` : 0,
+                height: shouldShow ? `${el.height}px` : 0,
+                transform: shouldShow ? `rotate(${el.angle}rad)` : "none",
                 pointerEvents: isActive ? POINTER_EVENTS.enabled : POINTER_EVENTS.disabled
               },
               children: [
-                isHovered && /* @__PURE__ */ jsx151("div", { className: "excalidraw__embeddable-hint", children: t("buttons.embeddableInteractionButton") }),
-                /* @__PURE__ */ jsx151(
+                isHovered && src?.type !== "localVideo" && /* @__PURE__ */ jsx152("div", { className: "excalidraw__embeddable-hint", children: t("buttons.embeddableInteractionButton") }),
+                /* @__PURE__ */ jsx152(
                   "div",
                   {
                     className: "excalidraw__embeddable__outer",
                     style: {
                       padding: `${el.strokeWidth}px`
                     },
-                    children: (isEmbeddableElement4(el) ? this.props.renderEmbeddable?.(el, this.state) : null) ?? /* @__PURE__ */ jsx151(
+                    children: (isEmbeddableElement4(el) ? this.props.renderEmbeddable?.(el, this.state) : null) ?? (src?.type === "localVideo" ? /* @__PURE__ */ jsx152(VideoPlayer, { dataURL: src.dataURL, isActive }) : /* @__PURE__ */ jsx152(
                       "iframe",
                       {
                         ref: (ref) => this.cacheEmbeddableRef(el, ref),
                         className: "excalidraw__embeddable",
                         srcDoc: src?.type === "document" ? src.srcdoc(this.state.theme) : void 0,
-                        src: src?.type !== "document" ? src?.link ?? "" : void 0,
+                        src: src?.type === "video" || src?.type === "generic" ? src.link : void 0,
                         scrolling: "no",
                         referrerPolicy: "no-referrer-when-downgrade",
                         title: "Excalidraw Embedded Content",
@@ -39286,7 +39854,7 @@ var App = class _App extends React45.Component {
                         allowFullScreen: true,
                         sandbox: `${src?.sandbox?.allowSameOrigin ? "allow-same-origin" : ""} allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads`
                       }
-                    )
+                    ))
                   }
                 )
               ]
@@ -39326,7 +39894,7 @@ var App = class _App extends React45.Component {
     );
     const firstSelectedElement = selectedElements[0];
     const showShapeSwitchPanel = editorJotaiStore.get(convertElementTypePopupAtom)?.type === "panel";
-    return /* @__PURE__ */ jsx151(
+    return /* @__PURE__ */ jsx152(
       "div",
       {
         translate: "no",
@@ -39344,21 +39912,21 @@ var App = class _App extends React45.Component {
         onKeyDown: this.props.handleKeyboardGlobally ? void 0 : this.onKeyDown,
         onPointerEnter: this.toggleOverscrollBehavior,
         onPointerLeave: this.toggleOverscrollBehavior,
-        children: /* @__PURE__ */ jsx151(AppContext.Provider, { value: this, children: /* @__PURE__ */ jsx151(AppPropsContext.Provider, { value: this.props, children: /* @__PURE__ */ jsx151(
+        children: /* @__PURE__ */ jsx152(AppContext.Provider, { value: this, children: /* @__PURE__ */ jsx152(AppPropsContext.Provider, { value: this.props, children: /* @__PURE__ */ jsx152(
           ExcalidrawContainerContext.Provider,
           {
             value: this.excalidrawContainerValue,
-            children: /* @__PURE__ */ jsx151(EditorInterfaceContext.Provider, { value: this.editorInterface, children: /* @__PURE__ */ jsx151(ExcalidrawSetAppStateContext.Provider, { value: this.setAppState, children: /* @__PURE__ */ jsx151(ExcalidrawAppStateContext.Provider, { value: this.state, children: /* @__PURE__ */ jsxs81(
+            children: /* @__PURE__ */ jsx152(EditorInterfaceContext.Provider, { value: this.editorInterface, children: /* @__PURE__ */ jsx152(ExcalidrawSetAppStateContext.Provider, { value: this.setAppState, children: /* @__PURE__ */ jsx152(ExcalidrawAppStateContext.Provider, { value: this.state, children: /* @__PURE__ */ jsxs82(
               ExcalidrawElementsContext.Provider,
               {
                 value: this.scene.getNonDeletedElements(),
                 children: [
-                  /* @__PURE__ */ jsxs81(
+                  /* @__PURE__ */ jsxs82(
                     ExcalidrawActionManagerContext.Provider,
                     {
                       value: this.actionManager,
                       children: [
-                        /* @__PURE__ */ jsx151(
+                        /* @__PURE__ */ jsx152(
                           LayerUI_default,
                           {
                             canvas: this.canvas,
@@ -39384,10 +39952,10 @@ var App = class _App extends React45.Component {
                             children: this.props.children
                           }
                         ),
-                        /* @__PURE__ */ jsx151("div", { className: "excalidraw-textEditorContainer" }),
-                        /* @__PURE__ */ jsx151("div", { className: "excalidraw-contextMenuContainer" }),
-                        /* @__PURE__ */ jsx151("div", { className: "excalidraw-eye-dropper-container" }),
-                        /* @__PURE__ */ jsx151(
+                        /* @__PURE__ */ jsx152("div", { className: "excalidraw-textEditorContainer" }),
+                        /* @__PURE__ */ jsx152("div", { className: "excalidraw-contextMenuContainer" }),
+                        /* @__PURE__ */ jsx152("div", { className: "excalidraw-eye-dropper-container" }),
+                        /* @__PURE__ */ jsx152(
                           SVGLayer,
                           {
                             trails: [
@@ -39397,7 +39965,7 @@ var App = class _App extends React45.Component {
                             ]
                           }
                         ),
-                        selectedElements.length === 1 && this.state.openDialog?.name !== "elementLinkSelector" && this.state.showHyperlinkPopup && /* @__PURE__ */ jsx151(
+                        selectedElements.length === 1 && this.state.openDialog?.name !== "elementLinkSelector" && this.state.showHyperlinkPopup && /* @__PURE__ */ jsx152(
                           Hyperlink,
                           {
                             element: firstSelectedElement,
@@ -39405,16 +39973,17 @@ var App = class _App extends React45.Component {
                             setAppState: this.setAppState,
                             onLinkOpen: this.props.onLinkOpen,
                             setToast: this.setToast,
-                            updateEmbedValidationStatus: this.updateEmbedValidationStatus
+                            updateEmbedValidationStatus: this.updateEmbedValidationStatus,
+                            files: this.files
                           },
                           firstSelectedElement.id
                         ),
-                        this.props.aiEnabled !== false && selectedElements.length === 1 && isMagicFrameElement2(firstSelectedElement) && /* @__PURE__ */ jsx151(
+                        this.props.aiEnabled !== false && selectedElements.length === 1 && isMagicFrameElement2(firstSelectedElement) && /* @__PURE__ */ jsx152(
                           ElementCanvasButtons,
                           {
                             element: firstSelectedElement,
                             elementsMap,
-                            children: /* @__PURE__ */ jsx151(
+                            children: /* @__PURE__ */ jsx152(
                               ElementCanvasButton,
                               {
                                 title: t("labels.convertToCode"),
@@ -39428,13 +39997,13 @@ var App = class _App extends React45.Component {
                             )
                           }
                         ),
-                        selectedElements.length === 1 && isIframeElement2(firstSelectedElement) && firstSelectedElement.customData?.generationData?.status === "done" && /* @__PURE__ */ jsxs81(
+                        selectedElements.length === 1 && isIframeElement2(firstSelectedElement) && firstSelectedElement.customData?.generationData?.status === "done" && /* @__PURE__ */ jsxs82(
                           ElementCanvasButtons,
                           {
                             element: firstSelectedElement,
                             elementsMap,
                             children: [
-                              /* @__PURE__ */ jsx151(
+                              /* @__PURE__ */ jsx152(
                                 ElementCanvasButton,
                                 {
                                   title: t("labels.copySource"),
@@ -39443,7 +40012,7 @@ var App = class _App extends React45.Component {
                                   onChange: () => this.onIframeSrcCopy(firstSelectedElement)
                                 }
                               ),
-                              /* @__PURE__ */ jsx151(
+                              /* @__PURE__ */ jsx152(
                                 ElementCanvasButton,
                                 {
                                   title: "Enter fullscreen",
@@ -39480,7 +40049,7 @@ var App = class _App extends React45.Component {
                             ]
                           }
                         ),
-                        this.state.toast !== null && /* @__PURE__ */ jsx151(
+                        this.state.toast !== null && /* @__PURE__ */ jsx152(
                           Toast,
                           {
                             message: this.state.toast.message,
@@ -39489,7 +40058,7 @@ var App = class _App extends React45.Component {
                             closable: this.state.toast.closable
                           }
                         ),
-                        this.state.contextMenu && /* @__PURE__ */ jsx151(
+                        this.state.contextMenu && /* @__PURE__ */ jsx152(
                           ContextMenu,
                           {
                             items: this.state.contextMenu.items,
@@ -39504,7 +40073,7 @@ var App = class _App extends React45.Component {
                             }
                           }
                         ),
-                        /* @__PURE__ */ jsx151(
+                        /* @__PURE__ */ jsx152(
                           StaticCanvas_default,
                           {
                             canvas: this.canvas,
@@ -39527,7 +40096,7 @@ var App = class _App extends React45.Component {
                             }
                           }
                         ),
-                        this.state.newElement && /* @__PURE__ */ jsx151(
+                        this.state.newElement && /* @__PURE__ */ jsx152(
                           NewElementCanvas_default,
                           {
                             appState: this.state,
@@ -39546,7 +40115,7 @@ var App = class _App extends React45.Component {
                             }
                           }
                         ),
-                        /* @__PURE__ */ jsx151(
+                        /* @__PURE__ */ jsx152(
                           InteractiveCanvas_default,
                           {
                             app: this,
@@ -39573,7 +40142,7 @@ var App = class _App extends React45.Component {
                             onDoubleClick: this.handleCanvasDoubleClick
                           }
                         ),
-                        this.state.userToFollow && /* @__PURE__ */ jsx151(
+                        this.state.userToFollow && /* @__PURE__ */ jsx152(
                           FollowMode_default,
                           {
                             width: this.state.width,
@@ -39583,14 +40152,14 @@ var App = class _App extends React45.Component {
                           }
                         ),
                         this.renderFrameNames(),
-                        this.state.activeLockedId && /* @__PURE__ */ jsx151(
+                        this.state.activeLockedId && /* @__PURE__ */ jsx152(
                           UnlockPopup_default,
                           {
                             app: this,
                             activeLockedId: this.state.activeLockedId
                           }
                         ),
-                        showShapeSwitchPanel && /* @__PURE__ */ jsx151(ConvertElementTypePopup_default, { app: this })
+                        showShapeSwitchPanel && /* @__PURE__ */ jsx152(ConvertElementTypePopup_default, { app: this })
                       ]
                     }
                   ),
@@ -39765,7 +40334,7 @@ var App = class _App extends React45.Component {
     }
     if (isBrave() && !isMeasureTextSupported()) {
       this.setState({
-        errorMessage: /* @__PURE__ */ jsx151(BraveMeasureTextError_default, {})
+        errorMessage: /* @__PURE__ */ jsx152(BraveMeasureTextError_default, {})
       });
     }
   }
@@ -40676,6 +41245,9 @@ var App = class _App extends React45.Component {
     return point.x > x1 - threshold && point.x < x2 + threshold && point.y > y1 - threshold && point.y < y2 + threshold;
   }
   getCurrentItemRoundness(elementType) {
+    if (elementType === "embeddable" || elementType === "iframe") {
+      return null;
+    }
     return this.state.currentItemRoundness === "round" ? {
       type: isUsingAdaptiveRadius4(elementType) ? ROUNDNESS6.ADAPTIVE_RADIUS : ROUNDNESS6.PROPORTIONAL_RADIUS
     } : null;
@@ -42127,10 +42699,10 @@ createTestHook();
 var App_default = App;
 
 // components/InitializeApp.tsx
-import { useEffect as useEffect47, useState as useState40 } from "react";
-import { jsx as jsx152 } from "react/jsx-runtime";
+import { useEffect as useEffect47, useState as useState41 } from "react";
+import { jsx as jsx153 } from "react/jsx-runtime";
 var InitializeApp = (props) => {
-  const [loading, setLoading] = useState40(true);
+  const [loading, setLoading] = useState41(true);
   useEffect47(() => {
     const updateLang = async () => {
       await setLanguage(currentLang2);
@@ -42139,16 +42711,16 @@ var InitializeApp = (props) => {
     const currentLang2 = languages.find((lang) => lang.code === props.langCode) || defaultLang;
     updateLang();
   }, [props.langCode]);
-  return loading ? /* @__PURE__ */ jsx152(LoadingMessage, { theme: props.theme }) : props.children;
+  return loading ? /* @__PURE__ */ jsx153(LoadingMessage, { theme: props.theme }) : props.children;
 };
 
 // components/footer/FooterCenter.tsx
 import clsx62 from "clsx";
-import { jsx as jsx153 } from "react/jsx-runtime";
+import { jsx as jsx154 } from "react/jsx-runtime";
 var FooterCenter = ({ children }) => {
   const { FooterCenterTunnel } = useTunnels();
   const appState = useUIAppState();
-  return /* @__PURE__ */ jsx153(FooterCenterTunnel.In, { children: /* @__PURE__ */ jsx153(
+  return /* @__PURE__ */ jsx154(FooterCenterTunnel.In, { children: /* @__PURE__ */ jsx154(
     "div",
     {
       className: clsx62("footer-center zen-mode-transition", {
@@ -42164,7 +42736,7 @@ FooterCenter.displayName = "FooterCenter";
 // components/live-collaboration/LiveCollaborationTrigger.tsx
 import clsx63 from "clsx";
 import { MQ_MIN_WIDTH_DESKTOP } from "@excalidraw/common";
-import { jsx as jsx154, jsxs as jsxs82 } from "react/jsx-runtime";
+import { jsx as jsx155, jsxs as jsxs83 } from "react/jsx-runtime";
 var LiveCollaborationTrigger2 = ({
   isCollaborating,
   onSelect,
@@ -42173,7 +42745,7 @@ var LiveCollaborationTrigger2 = ({
 }) => {
   const appState = useUIAppState();
   const showIconOnly = editorInterface?.formFactor !== "desktop" || appState.width < MQ_MIN_WIDTH_DESKTOP;
-  return /* @__PURE__ */ jsxs82(
+  return /* @__PURE__ */ jsxs83(
     Button,
     {
       ...rest,
@@ -42184,7 +42756,7 @@ var LiveCollaborationTrigger2 = ({
       title: t("labels.liveCollaboration"),
       children: [
         showIconOnly ? share : t("labels.share"),
-        appState.collaborators.size > 0 && /* @__PURE__ */ jsx154("div", { className: "CollabButton-collaborators", children: appState.collaborators.size })
+        appState.collaborators.size > 0 && /* @__PURE__ */ jsx155("div", { className: "CollabButton-collaborators", children: appState.collaborators.size })
       ]
     }
   );
@@ -42193,15 +42765,15 @@ var LiveCollaborationTrigger_default = LiveCollaborationTrigger2;
 LiveCollaborationTrigger2.displayName = "LiveCollaborationTrigger";
 
 // components/ExcalidrawLogo.tsx
-import { jsx as jsx155, jsxs as jsxs83 } from "react/jsx-runtime";
-var LogoIcon = () => /* @__PURE__ */ jsx155(
+import { jsx as jsx156, jsxs as jsxs84 } from "react/jsx-runtime";
+var LogoIcon = () => /* @__PURE__ */ jsx156(
   "svg",
   {
     viewBox: "0 0 40 40",
     fill: "none",
     xmlns: "http://www.w3.org/2000/svg",
     className: "ExcalidrawLogo-icon",
-    children: /* @__PURE__ */ jsx155(
+    children: /* @__PURE__ */ jsx156(
       "path",
       {
         d: "M39.9 32.889a.326.326 0 0 0-.279-.056c-2.094-3.083-4.774-6-7.343-8.833l-.419-.472a.212.212 0 0 0-.056-.139.586.586 0 0 0-.167-.111l-.084-.083-.056-.056c-.084-.167-.28-.278-.475-.167-.782.39-1.507.973-2.206 1.528-.92.722-1.842 1.445-2.708 2.25a8.405 8.405 0 0 0-.977 1.028c-.14.194-.028.361.14.444-.615.611-1.23 1.223-1.843 1.861a.315.315 0 0 0-.084.223c0 .083.056.166.111.194l1.09.833v.028c1.535 1.528 4.244 3.611 7.12 5.861.418.334.865.667 1.284 1 .195.223.39.473.558.695.084.11.28.139.391.055.056.056.14.111.196.167a.398.398 0 0 0 .167.056.255.255 0 0 0 .224-.111.394.394 0 0 0 .055-.167c.029 0 .028.028.056.028a.318.318 0 0 0 .224-.084l5.082-5.528a.309.309 0 0 0 0-.444Zm-14.63-1.917a.485.485 0 0 0 .111.14c.586.5 1.2 1 1.843 1.555l-2.569-1.945-.251-.166c-.056-.028-.112-.084-.168-.111l-.195-.167.056-.056.055-.055.112-.111c.866-.861 2.346-2.306 3.1-3.028-.81.805-2.43 3.167-2.095 3.944Zm8.767 6.89-2.122-1.612a44.713 44.713 0 0 0-2.625-2.5c1.145.861 2.122 1.611 2.262 1.75 1.117.972 1.06.806 1.815 1.445l.921.666a1.06 1.06 0 0 1-.251.25Zm.558.416-.056-.028c.084-.055.168-.111.252-.194l-.196.222ZM1.089 5.75c.055.361.14.722.195 1.056.335 1.833.67 3.5 1.284 4.75l.252.944c.084.361.223.806.363.917 1.424 1.25 3.602 3.11 5.947 4.889a.295.295 0 0 0 .363 0s0 .027.028.027a.254.254 0 0 0 .196.084.318.318 0 0 0 .223-.084c2.988-3.305 5.221-6.027 6.813-8.305.112-.111.14-.278.14-.417.111-.111.195-.25.307-.333.111-.111.111-.306 0-.39l-.028-.027c0-.055-.028-.139-.084-.167-.698-.666-1.2-1.138-1.731-1.638-.922-.862-1.871-1.75-3.881-3.75l-.028-.028c-.028-.028-.056-.056-.112-.056-.558-.194-1.703-.389-3.127-.639C6.087 2.223 3.21 1.723.614.944c0 0-.168 0-.196.028l-.083.084c-.028.027-.056.055-.224.11h.056-.056c.028.167.028.278.084.473 0 .055.112.5.112.555l.782 3.556Zm15.496 3.278-.335-.334c.084.112.196.195.335.334Zm-3.546 4.666-.056.056c0-.028.028-.056.056-.056Zm-2.038-10c.168.167.866.834 1.033.973-.726-.334-2.54-1.167-3.379-1.445.838.167 1.983.334 2.346.472ZM1.424 2.306c.419.722.754 3.222 1.089 5.666-.196-.778-.335-1.555-.503-2.278-.251-1.277-.503-2.416-.838-3.416.056 0 .14 0 .252.028Zm-.168-.584c-.112 0-.223-.028-.307-.028 0-.027 0-.055-.028-.055.14 0 .223.028.335.083Zm-1.089.222c0-.027 0-.027 0 0ZM39.453 1.333c.028-.11-.558-.61-.363-.639.42-.027.42-.666 0-.666-.558.028-1.144.166-1.675.25-.977.194-1.982.389-2.96.61-2.205.473-4.383.973-6.561 1.557-.67.194-1.424.333-2.066.666-.224.111-.196.333-.084.472-.056.028-.084.028-.14.056-.195.028-.363.056-.558.083-.168.028-.252.167-.224.334 0 .027.028.083.028.11-1.173 1.556-2.485 3.195-3.909 4.945-1.396 1.611-2.876 3.306-4.356 5.056-4.719 5.5-10.052 11.75-15.943 17.25a.268.268 0 0 0 0 .389c.028.027.056.055.084.055-.084.084-.168.14-.252.222-.056.056-.084.111-.084.167a.605.605 0 0 0-.111.139c-.112.111-.112.305.028.389.111.11.307.11.39-.028.029-.028.029-.056.056-.056a.44.44 0 0 1 .615 0c.335.362.67.723.977 1.028l-.698-.583c-.112-.111-.307-.083-.39.028-.113.11-.085.305.027.389l7.427 6.194c.056.056.112.056.196.056s.14-.028.195-.084l.168-.166c.028.027.083.027.111.027.084 0 .14-.027.196-.083 10.052-10.055 18.15-17.639 27.42-24.417.083-.055.111-.166.111-.25.112 0 .196-.083.251-.194 1.704-5.194 2.039-9.806 2.15-12.083v-.028c0-.028.028-.056.028-.083.028-.056.028-.084.028-.084a1.626 1.626 0 0 0-.111-1.028ZM21.472 9.5c.446-.5.893-1.028 1.34-1.5-2.876 3.778-7.65 9.583-14.408 16.5 4.607-5.083 9.242-10.333 13.068-15ZM5.193 35.778h.084-.084Zm3.462 3.194c-.027-.028-.027-.028 0-.028v.028Zm4.16-3.583c.224-.25.448-.472.699-.722 0 0 0 .027.028.027-.252.223-.475.445-.726.695Zm1.146-1.111c.14-.14.279-.334.446-.5l.028-.028c1.648-1.694 3.351-3.389 5.082-5.111l.028-.028c.419-.333.921-.694 1.368-1.028a379.003 379.003 0 0 0-6.952 6.695ZM24.794 6.472c-.921 1.195-1.954 2.778-2.82 4.028-2.736 3.944-11.532 13.583-11.727 13.75a1976.983 1976.983 0 0 1-8.042 7.639l-.167.167c-.14-.167-.14-.417.028-.556C14.49 19.861 22.03 10.167 25.074 5.917c-.084.194-.14.36-.28.555Zm4.83 5.695c-1.116-.64-1.646-1.64-1.34-2.611l.084-.334c.028-.083.084-.194.14-.277.307-.5.754-.917 1.257-1.167.027 0 .055 0 .083-.028-.028-.056-.028-.139-.028-.222.028-.167.14-.278.335-.278.335 0 1.369.306 1.76.639.111.083.223.194.335.305.14.167.363.445.474.667.056.028.112.306.196.445.056.222.111.472.084.694-.028.028 0 .194-.028.194a2.668 2.668 0 0 1-.363 1.028c-.028.028-.028.056-.056.084l-.028.027c-.14.223-.335.417-.53.556-.643.444-1.369.583-2.095.389 0 0-.195-.084-.28-.111Zm8.154-.834a39.098 39.098 0 0 1-.893 3.167c0 .028-.028.083 0 .111-.056 0-.084.028-.14.056-2.206 1.61-4.356 3.305-6.506 5.028 1.843-1.64 3.686-3.306 5.613-4.945.558-.5.949-1.139 1.06-1.861l.28-1.667v-.055c.14-.334.67-.195.586.166Z",
@@ -42210,7 +42782,7 @@ var LogoIcon = () => /* @__PURE__ */ jsx155(
     )
   }
 );
-var LogoText = () => /* @__PURE__ */ jsxs83(
+var LogoText = () => /* @__PURE__ */ jsxs84(
   "svg",
   {
     viewBox: "0 0 450 55",
@@ -42218,28 +42790,28 @@ var LogoText = () => /* @__PURE__ */ jsxs83(
     fill: "none",
     className: "ExcalidrawLogo-text",
     children: [
-      /* @__PURE__ */ jsx155(
+      /* @__PURE__ */ jsx156(
         "path",
         {
           d: "M429.27 96.74c2.47-1.39 4.78-3.02 6.83-4.95 1.43-1.35 2.73-2.86 3.81-4.51-.66.9-1.4 1.77-2.23 2.59-2.91 2.84-5.72 5.09-8.42 6.87h.01ZM343.6 69.36c.33 3.13.58 6.27.79 9.4.09 1.37.18 2.75.25 4.12-.12-4.46-.27-8.93-.5-13.39-.11-2.08-.24-4.16-.4-6.24-.06 1.79-.11 3.85-.13 6.11h-.01ZM378.47 98.34c.01-.37.07-1.13.01-6.51-.11 1.9-.22 3.81-.31 5.71-.07 1.42-.22 2.91-.16 4.35.39.03.78.07 1.17.1-.92-.85-.76-2.01-.72-3.66l.01.01ZM344.09 86.12c-.09-2.41-.22-4.83-.39-7.24v12.21c.15-.05.32-.09.47-.14.05-1.61-.03-3.23-.09-4.83h.01ZM440.69 66.79c-.22-.34-.45-.67-.69-.99-3.71-4.87-9.91-7.14-15.65-8.55-1.05-.26-2.12-.49-3.18-.71 2.29.59 4.48 1.26 6.64 2.02 7.19 2.54 10.57 5.41 12.88 8.23ZM305.09 72.46l1.2 3.6c.84 2.53 1.67 5.06 2.46 7.61.24.78.5 1.57.73 2.36.22-.04.44-.08.67-.12a776.9 776.9 0 0 1-5.01-13.57c-.02.04-.03.09-.05.13v-.01ZM345.49 90.25v.31c1.48-.42 3.05-.83 4.66-1.2-1.56.25-3.12.52-4.66.89ZM371.02 90.22c0-.57-.04-1.14-.11-1.71-.06-.02-.12-.04-.19-.05-.21-.05-.43-.08-.65-.11.42.16.74.88.95 1.87ZM398.93 54.23c-.13 0-.27-.01-.4-.02l.03.4c.11-.15.23-.27.37-.38ZM401.57 62.28v-.15c-1.22-.24-2.86-.61-3.23-1.25-.09-.15-.18-.51-.27-.98-.09.37-.2.73-.33 1.09 1.24.56 2.52.98 3.83 1.29ZM421.73 88.68c-2.97 1.65-6.28 3.12-9.69 3.68v.18c4.72-.14 11.63-3.85 16.33-8.38-2.04 1.75-4.33 3.24-6.63 4.53l-.01-.01ZM411.28 80.92c-.05-1.2-.09-2.4-.15-3.6-.21 5.66-.46 11.38-.47 14.51.24-.02.48-.04.71-.07.15-3.61.05-7.23-.09-10.83v-.01Z",
           transform: "translate(-144.023 -51.76)"
         }
       ),
-      /* @__PURE__ */ jsx155(
+      /* @__PURE__ */ jsx156(
         "path",
         {
           d: "M425.38 67.41c-3.5-1.45-7.19-2.57-14.06-3.62.09 1.97.06 4.88-.03 8.12.03.04.06.09.06.15.19 1.36.28 2.73.37 4.1.25 3.77.39 7.55.41 11.33 0 1.38-.01 2.76-.07 4.13 1.4-.25 2.78-.65 4.12-1.15 4.07-1.5 7.94-3.78 11.28-6.54 2.33-1.92 5.13-4.49 5.88-7.58.63-3.53-2.45-6.68-7.97-8.96l.01.02ZM411.35 92.53v-.06l-.34.03c.11.01.22.03.34.03ZM314.26 64.06c-.23-.59-.47-1.17-.7-1.75.57 1.62 1.11 3.25 1.6 4.9l.15.54 2.35 6.05c.32.82.66 1.64.98 2.46-1.38-4.1-2.83-8.17-4.39-12.2h.01ZM156.82 103.07c-.18.13-.38.23-.58.33 1.32-.03 2.66-.2 3.93-.34.86-.09 1.72-.22 2.58-.33-2.12.1-4.12.17-5.94.34h.01ZM210.14 68.88s.03.04.05.07c.18-.31.39-.64.58-.96-.21.3-.42.6-.64.89h.01ZM201.65 82.8c-.5.77-1.02 1.56-1.49 2.37 1.11-1.55 2.21-3.1 3.2-4.59-.23.23-.49.51-.75.79-.32.47-.65.95-.96 1.43ZM194.03 98.66c-.33-.4-.65-.84-1.05-1.17-.24-.2-.07-.49.17-.56-.23-.26-.42-.5-.63-.75 1.51-2.55 3.93-5.87 6.4-9.28-.17-.08-.29-.28-.2-.49.04-.09.09-.17.13-.26-1.21 1.78-2.42 3.55-3.61 5.33-.87 1.31-1.74 2.64-2.54 4-.29.5-.63 1.04-.87 1.61.81.65 1.63 1.27 2.47 1.88-.09-.11-.18-.21-.27-.32v.01ZM307.79 82.93c-1-3.17-2.05-6.32-3.1-9.48-1.62 4.08-3.69 9.17-6.16 15.19 3.32-1.04 6.77-1.87 10.27-2.5-.32-1.08-.67-2.15-1.01-3.21ZM149.5 80.7c.05-1.71.04-3.43 0-5.14-.1 2.26-.16 4.51-.22 6.77-.02.73-.03 1.46-.04 2.19.14-1.27.2-2.55.24-3.82h.02ZM228.98 98.3c.39 1.25.91 3.03.94 3.91.06-.03.12-.07.17-.1.08-1.29-.55-2.65-1.11-3.81ZM307.72 53.36c.81.5 1.53 1.04 2.07 1.49-.38-.8-.78-1.58-1.21-2.35-.17.03-.34.06-.51.11-.43.12-.86.26-1.29.41.35-.01.53.1.94.34ZM283.69 96.14c3.91-7.25 6.89-13.35 8.88-18.15l1.1-2.66c-1.27 2.64-2.56 5.27-3.83 7.9-1.53 3.15-3.06 6.31-4.58 9.47-.87 1.81-1.76 3.62-2.54 5.47.04.02.07.04.11.07.05.05.1.09.15.14.05-.73.27-1.48.71-2.24ZM289.92 103.23s-.04.01-.05.03c0-.02.04-.03.05-.04.05-.05.11-.1.16-.15l.21-.21c-.55 0-1.5-.27-2.55-.72.4.26.8.51 1.22.74.24.13.48.26.73.37.05.02.1.03.14.05a.27.27 0 0 1 .08-.07h.01ZM269.23 68.49c-.39-.19-.82-.48-1.33-.87-3.06-1.56-6.31-2.78-9.36-2.35-3.5.49-5.7 1.11-7.74 2.44 5.71-2.6 12.82-2.07 18.44.79l-.01-.01ZM177.87 53.69l1.06.03c-.96-.22-2-.25-2.89-.3-4.95-.26-9.99.33-14.86 1.19-2.44.43-4.88.95-7.28 1.59 9.09-1.76 15.69-2.77 23.97-2.51ZM219.85 55.51c-.18.12-.36.27-.56.45-.45.53-.86 1.11-1.26 1.66-1.91 2.61-3.71 5.31-5.57 7.95l-.12.18 8.05-10.11c-.18-.05-.36-.1-.55-.13h.01ZM510.71 54.1c.12-.15.29-.3.53-.45.69-.4 3.72-.63 5.87-.74-.36-.02-.73-.04-1.09-.05-1.84-.03-3.67.09-5.49.35.05.3.12.59.18.88v.01ZM510.76 86.02c1.37-3.07 2.49-6.27 3.57-9.46.55-1.64 1.12-3.3 1.6-4.97-1.59 4.01-3.67 9.14-6.2 15.3.24-.08.5-.14.74-.22.1-.22.19-.44.29-.65ZM566.95 75.76c.11-.02.23.03.31.11-.05-.13-.09-.26-.14-.39-.05.09-.11.18-.17.28ZM511.33 86.41c3.08-.89 6.24-1.62 9.46-2.14-1.51-3.98-2.98-7.96-4.39-11.87-.05.15-.09.31-.14.46-1.02 3.32-2.15 6.61-3.39 9.85-.48 1.25-.98 2.49-1.53 3.7h-.01ZM578.24 74.45c.11-.44.23-.87.35-1.31-.31.7-.64 1.39-.97 2.08.09.21.19.4.28.61.12-.46.23-.92.35-1.38h-.01ZM520.62 53.11c-.09 0-.18-.01-.28-.02.38.34.29 1.08.93 2.53l6.65 17.15c2.2 5.68 4.69 11.36 7.41 16.87l1.06 2.17c-2.95-7.05-5.92-14.08-8.87-21.13-1.58-3.79-3.16-7.59-4.7-11.4-.78-1.92-1.73-3.89-2.25-5.91-.03-.1 0-.19.04-.26h.01ZM578.78 77.87c1.45-5.77 3.07-10.43 3.58-13.36.05-.34.16-.88.31-1.55-.67 1.79-1.37 3.56-2.08 5.33-.12.43-.23.86-.35 1.29-.65 2.43-1.29 4.86-1.9 7.3.14.33.29.65.43 1l.01-.01ZM545.3 94.66c.02-.44.03-.83.05-1.12.02-1.01.05-2.02.11-3.02.03-6.66-.46-14.33-1.46-22.8-.13-.42-.27-1.24-.56-2.89 0-.02 0-.04-.01-.06.62 6.61.95 13.25 1.32 19.87.17 3.08.33 6.16.52 9.23.02.25.03.52.04.78l-.01.01ZM580.77 102.81c.13.2.27.38.37.49.27-.11.53-.22.8-.32-.43.09-.82.05-1.17-.16v-.01ZM530.48 104.07h.33c-.36-.13-.71-.32-1.04-.56.14.24.3.47.45.7.06-.08.14-.13.26-.13v-.01ZM542.63 58.82c.06.23.11.47.15.71.14-.33.36-.62.7-.86-.28.05-.57.11-.85.15ZM583.81 57.87c.15-.7.29-1.41.42-2.11-.14.45-.28.9-.42 1.34-.46 1.44-.89 2.89-1.31 4.34.44-1.19.88-2.37 1.31-3.57ZM523.62 91.48c-4.66 1.17-9.05 2.89-14.02 5.27 4.65-1.84 9.48-3.29 14.28-4.63-.09-.22-.17-.41-.26-.64ZM460.64 78.3c-.04-2.9-.11-5.81-.28-8.71-.1-1.68-.17-3.43-.5-5.09-.07.02-.14.03-.2.05.3 6.54.45 12.17.51 17.12.17-.07.34-.14.51-.2 0-1.06-.01-2.11-.03-3.17h-.01ZM470.63 63.24c-3.38-.26-6.81.32-10.1 1.1.41 2.01.47 4.14.57 6.18.18 3.55.25 7.11.27 10.67 3.31-1.38 6.5-3.12 9.3-5.35 1.96-1.56 3.86-3.41 5.02-5.66.73-1.41 1.19-3.22.26-4.65-1.09-1.7-3.46-2.14-5.32-2.29ZM460.29 63.68c1-.24 2.01-.46 3.04-.65-1.15.16-2.37.38-3.71.69v.13c.07-.02.15-.04.22-.05.11-.13.3-.18.45-.11v-.01ZM457.24 100.96c.43-.03.86-.07 1.29-.11.14-.49.27-.99.38-1.49-.44.7-1 1.23-1.67 1.6ZM482.88 104.98c-.18.23-.36.38-.55.47.14.09.27.19.4.28a70.76 70.76 0 0 0 4.37-4.63c.76-.89 1.52-1.81 2.19-2.77-.3-.27-.61-.53-.92-.79-.07 1.94-4.62 6.32-5.49 7.45v-.01Z",
           transform: "translate(-144.023 -51.76)"
         }
       ),
-      /* @__PURE__ */ jsx155(
+      /* @__PURE__ */ jsx156(
         "path",
         {
           d: "M474.36 63.31c-.4-.16-.84-.27-1.29-.37 1.56.42 3.08 1.22 3.76 2.74.62 1.4.32 2.95-.28 4.32.7-1.22.94-2.34.74-3.47-.24-1.33-1.19-2.54-2.93-3.21v-.01ZM477.34 89.18c-1.2-.81-2.4-1.62-3.6-2.42-.14.1-.26.19-.4.29 1.4.67 2.73 1.39 4 2.13ZM465.88 93.85c.37.25.74.5 1.1.75.46.32.92.65 1.38.97-1.57-1.2-2.01-1.61-2.49-1.72h.01ZM574.92 90.06c-2.28-5.21-4.93-11.13-5.67-12.26-.1-.15-1.57-3.01-1.63-3.08 0 0-.01.02-.02.02.4 1.37 1.09 2.69 1.65 3.99 2.14 4.95 4.36 9.86 6.67 14.73.6 1.26 1.21 2.52 1.83 3.78-.75-2.01-1.64-4.45-2.83-7.18ZM448.73 65.29c.1.2.22.38.34.57.22-.02.43-.06.65-.08v-.08c-.14-.05-.25 0-.99-.41ZM460.16 94.81c-.02.31-.06.59-.1.89-.03 1.71-.33 3.43-.79 5.07.15-.02.3-.03.45-.05.01-.04.02-.08.03-.11.09-.34.15-.69.2-1.03.17-1.07.25-2.16.33-3.24.05-.69.08-1.39.12-2.08-.27.1-.27.26-.24.57v-.02Z",
           transform: "translate(-144.023 -51.76)"
         }
       ),
-      /* @__PURE__ */ jsx155(
+      /* @__PURE__ */ jsx156(
         "path",
         {
           d: "m328.67 98.12-3.22-6.58c-1.29-2.63-2.53-5.29-3.72-7.97-.25-.85-.52-1.69-.79-2.53-.81-2.57-1.67-5.12-2.55-7.67-1.92-5.53-3.9-11.08-6.32-16.41-.72-1.58-1.46-3.44-2.63-4.79-.03-.17-.16-.29-.34-.36a.282.282 0 0 0-.23-.04c-.06-.01-.12 0-.18.01-.74.06-1.5.38-2.19.61-2.22.77-4.4 1.64-6.63 2.38-.03-.08-.06-.16-.09-.25-.15-.42-.82-.24-.67.19.03.09.07.19.1.28l-.18.06c-.36.11-.28.6 0 .68.18 1.18.63 2.36.98 3.49.03.09.06.17.08.26-.08.23-.17.46-.24.64-.37.98-.79 1.94-1.21 2.9-1.27 2.89-2.62 5.75-3.98 8.6-3.18 6.67-6.44 13.31-9.64 19.97-1.08 2.25-2.2 4.5-3.15 6.81-.13.32.24.5.5.37 1.34 1.33 2.84 2.5 4.4 3.57.65.44 1.31.87 2.01 1.24.4.22.86.48 1.33.5.24.01.35-.19.33-.37.11-.1.21-.21.28-.28.41-.41.81-.84 1.2-1.26.85-.92 1.69-1.87 2.5-2.84 6.31-2.34 12.6-4.31 18.71-5.84 2.14 5.3 3.43 8.43 3.97 9.58.55 1.05 1.15 1.88 1.82 2.52 1.32.56 6.96-.03 9.23-1.96.87-1.28 1.19-2.67.93-4.15-.09-.5-.22-.95-.4-1.33l-.01-.03Zm-20.09-45.61c.43.77.83 1.56 1.21 2.35-.54-.45-1.27-.99-2.07-1.49-.42-.24-.6-.35-.94-.34.43-.15.85-.29 1.29-.41.17-.05.34-.08.51-.11Zm-25.86 45.66c.78-1.85 1.67-3.66 2.54-5.47 1.51-3.16 3.05-6.31 4.58-9.47 1.28-2.63 2.56-5.26 3.83-7.9l-1.1 2.66c-1.99 4.79-4.97 10.9-8.88 18.15-.43.76-.66 1.51-.71 2.24-.05-.05-.1-.09-.15-.14a.259.259 0 0 0-.11-.07Zm6.24 4.71c-.42-.23-.82-.48-1.22-.74 1.05.45 2 .72 2.55.72l-.21.21c-.05.05-.11.1-.16.15-.01.01-.04.03-.05.04 0-.02.03-.02.05-.03a.27.27 0 0 0-.08.07c-.05-.02-.1-.03-.14-.05-.25-.1-.49-.24-.73-.37h-.01Zm15.73-29.43c1.05 3.15 2.1 6.31 3.1 9.48.34 1.06.69 2.13 1.01 3.21-3.5.63-6.95 1.46-10.27 2.5 2.48-6.03 4.54-11.11 6.16-15.19Zm4.79 12.57c-.23-.79-.49-1.58-.73-2.36-.79-2.54-1.63-5.08-2.46-7.61l-1.2-3.6c.02-.04.04-.09.05-.13 1.6 4.45 3.28 9 5.01 13.57l-.67.12v.01Zm5.83-18.27-.15-.54c-.49-1.64-1.03-3.28-1.6-4.9.23.58.47 1.17.7 1.75 1.56 4.03 3.01 8.1 4.39 12.2-.33-.82-.67-1.64-.98-2.46l-2.35-6.05h-.01ZM390.43 79.37c-.13-10.43-.22-17.5-.24-19.97-.24-1.6.21-2.88-.65-3.65-.14-.13-.32-.23-.52-.32h.03c.45 0 .45-.69 0-.7-1.75-.03-3.5-.04-5.25-.14-1.38-.08-2.76-.21-4.15-.31-.07 0-.12.01-.17.04-.21-.07-.47.03-.45.31l.03.45c-.11.14-.19.3-.22.5-.21 1.26-.32 13.67-.36 23.59-.32 5.79-.67 11.57-.97 17.36-.09 1.73-.29 3.54-.21 5.3-.39.02-.38.64.04.69v.12c.05.44.74.45.7 0v-.06c1.1.09 2.2.21 3.3.3 1.14.19 2.44.2 3.29.17 1.73-.05 2.92-.05 3.8-.37.45-.05.9-.11 1.35-.17.44-.06.25-.73-.19-.67h-.01c.24-.32.45-.72.62-1.25.66-1.84.41-6.36.34-11.33l-.13-9.9.02.01Zm-12.26 18.17c.09-1.91.2-3.81.31-5.71.06 5.38 0 6.14-.01 6.51-.05 1.65-.21 2.81.72 3.66-.39-.04-.78-.07-1.17-.1-.06-1.44.09-2.93.16-4.35l-.01-.01ZM588.97 53.85c-2.06-.25-3.17-.51-3.76-.6a.3.3 0 0 1 .04-.08c.22-.39-.39-.75-.6-.35-.56 1.02-.9 2.19-1.26 3.29-.61 1.88-1.17 3.78-1.72 5.68-.63 2.19-1.24 4.39-1.83 6.59-.81 2.03-1.67 4.05-2.61 6.03-1.7-3.64-3.11-6.04-4.03-7.57-2.26-3.74-2.85-5.48-3.57-6.08l.31-.09c.43-.12.25-.8-.19-.67-1.06.3-2.12.6-3.17.95-.93.32-1.85.69-2.76 1.07-.13.05-.19.16-.22.27-.04.02-.08.05-.11.07-.04-.06-.07-.12-.11-.18a.354.354 0 0 0-.48-.12c-.16.09-.22.32-.13.48l.33.54c0 .09.02.18.06.28.51 1.16.78 1.38.72 1.47-2.42 3.44-5.41 7.86-6.2 9.1-1.27 1.97-2.01 3.14-2.45 3.84l-.91-6.56-.43-4.1c-.19-1.85-.37-3.23-.53-4.13-.19-1.1-.3-2.15-.45-3.16-.2-1.36-.29-2.06-.47-2.42h.04c.45.02.45-.68 0-.7-3.43-.16-6.81.94-10.17 1.48-.24-.22-.73-.04-.58.32.24.59.33 1.25.43 1.87.17 1.06.29 2.13.4 3.2.32 3.09.53 6.2.74 9.3.44 6.75.77 13.51 1.17 20.26.11 1.95.13 3.96.46 5.89.05.3.37.31.55.14.74 1.71 2.87 1.27 6.13 1.27 1.34 0 2.39.04 2.99-.11.02.32.48.53.63.18 3.61-8.26 7.41-16.46 12.05-24.2.03-.05.04-.1.05-.15.3.73.64 1.45.94 2.16.97 2.26 1.97 4.52 2.98 6.76 2.26 5.03 4.54 10.07 7.09 14.96.47.9.94 1.79 1.47 2.65.2.32.4.67.66.96-.18.25 0 .68.34.54.91-.38 1.82-.75 2.76-1.07 1.04-.35 2.11-.65 3.17-.95.39-.11.28-.66-.07-.68.62-.4.95-.96.87-1.91-.3-3.34.72-7.47.86-8.52l2.14-11.43c1.75-10.74 3.13-17.51 3.23-20.86.02-.49.08-2.84.13-3.24.17-1.25.48-1-4.96-1.65l.03-.02Zm-46.19 5.67c-.04-.24-.09-.48-.15-.71l.85-.15c-.34.24-.56.53-.7.86Zm1.95 25.12c-.36-6.63-.7-13.26-1.32-19.87 0 .02 0 .04.01.06.29 1.65.44 2.47.56 2.89 1 8.46 1.5 16.14 1.46 22.8-.06.99-.1 2-.11 3.02-.01.29-.03.68-.05 1.12-.01-.26-.03-.53-.04-.78-.19-3.08-.35-6.16-.52-9.23l.01-.01Zm36.4 18.66c-.11-.11-.24-.29-.37-.49.35.21.74.26 1.17.16-.27.11-.53.22-.8.32v.01Zm-.89-33.72c.12-.43.23-.86.35-1.29.71-1.77 1.41-3.55 2.08-5.33-.15.68-.26 1.22-.31 1.55-.5 2.94-2.13 7.59-3.58 13.36-.15-.35-.29-.66-.43-1 .61-2.44 1.25-4.87 1.9-7.3l-.01.01Zm3.56-12.48c.14-.44.28-.89.42-1.34-.13.7-.27 1.41-.42 2.11-.43 1.19-.86 2.38-1.31 3.57.42-1.45.85-2.9 1.31-4.34Zm-5.22 16.05c-.11.44-.23.87-.35 1.31-.12.46-.23.92-.35 1.38-.1-.22-.19-.4-.28-.61.34-.69.66-1.38.97-2.08h.01Zm-11.64 2.62c.06-.1.12-.19.17-.28.05.13.09.26.14.39a.398.398 0 0 0-.31-.11Zm2.3 2.98c-.56-1.3-1.25-2.63-1.65-3.99 0 0 .01-.02.02-.02.06.08 1.52 2.93 1.63 3.08.73 1.13 3.38 7.04 5.67 12.26 1.2 2.73 2.08 5.17 2.83 7.18-.62-1.25-1.23-2.51-1.83-3.78-2.31-4.87-4.53-9.78-6.67-14.73ZM275.92 87.03c-1.06-2.18-1.13-3.45-2.44-2.93-1.52.57-2.94 1.3-4.5 2.1-1.4.72-2.68 1.44-3.92 2.12.01-.25-.24-.5-.51-.34-4.8 2.93-12.41 4.7-17.28 1.31-1.98-1.77-3.32-4.15-3.97-5.78-.29-.95-.49-1.94-.63-2.93-.14-3.34 1.58-6.53 3.9-9.12.8-.79 1.68-1.51 2.66-2.12 3.7-2.3 8.22-3.07 12.51-2.51 2.71.35 5.32 1.24 7.71 2.55.39.22.75-.39.35-.6-.18-.1-.37-.18-.55-.27.56.27 1.03.33 1.51.19l-.48.39c-.15.11-.23.3-.13.48.09.15.33.24.48.13 1.3-.97 2.46-2.09 3.45-3.37.37-.29.64-.6.65-.97v-.02c.08-.33-.03-.7-.21-1.08-.31-.87-.98-2.01-2.19-3.26-2.43-2.52-3.79-3.45-5.68-4.26-1.14-.49-3.12-1.06-4.42-1.23-3.28-.42-10.64-1.21-18.18 4.11-7.74 5.46-11.94 12.3-12.23 20.61-.08 2.06.04 3.98.34 5.71.74 4.18 2.57 8 5.44 11.34 4.26 4.99 9.76 7.52 16.34 7.52 4.85 0 9.69-1.77 14.89-4.62.23-.12.45-.23.68-.35 2.19-1.1 4.37-2.23 6.46-3.5.49-.3 1.03-.61 1.5-.98 1.47-.87 1.11-1.12.49-2.95-.39-1.14-.76-2.7-2.06-5.36l.02-.01Zm-17.38-21.76c3.05-.42 6.31.79 9.36 2.35.51.39.94.68 1.33.87-5.61-2.86-12.72-3.39-18.44-.79 2.05-1.33 4.24-1.95 7.74-2.44l.01.01ZM443.67 72.67c-.4-2.2-1.15-4.33-2.37-6.22-1.49-2.32-3.58-4.19-5.91-5.64-6.17-3.81-13.75-5.11-20.83-6.01-3.23-.41-6.47-.69-9.72-.92l-1.39-.12c-.85-.07-1.52-.1-2.05-.1-1.08-.06-2.17-.12-3.25-.17-.08 0-.14.02-.19.05-.1.05-.18.14-.16.3.27 2.55-.01 5.12-.92 7.52-.15.38.4.56.62.28 1.32.59 2.68 1.05 4.08 1.37 0 2.78-.14 7.58-.33 12.91 0 0 0 .02-.01.03-.61 3.66-.79 7.42-1 11.12-.23 4.01-.43 8.03-.44 12.05 0 .64 0 1.28.03 1.93.02.31 0 .68.15.96.06.11.14.16.24.17-.2.17-.21.54.11.59 3.83.67 7.78.71 11.68.25 2.3-.19 4.87-.65 7.65-1.56 1.85-.54 3.67-1.18 5.43-1.91 7.2-3.02 14.31-8.07 17.35-15.53.76-1.86 1.17-3.8 1.31-5.75.3-1.93.28-3.82-.09-5.58l.01-.02Zm-19.32-15.42c5.74 1.41 11.94 3.68 15.65 8.55.25.32.47.65.69.99-2.3-2.82-5.68-5.69-12.88-8.23-2.16-.76-4.35-1.43-6.64-2.02 1.06.21 2.13.45 3.18.71Zm-25.82-3.04c.13 0 .27.01.4.02-.14.1-.26.23-.37.38 0-.13-.02-.26-.03-.4Zm34.82 22.17c-.75 3.09-3.55 5.66-5.88 7.58-3.35 2.76-7.21 5.03-11.28 6.54-1.33.49-2.71.9-4.12 1.15.06-1.38.08-2.76.07-4.13-.02-3.78-.16-7.56-.41-11.33-.09-1.37-.18-2.74-.37-4.1 0-.06-.03-.11-.06-.15.09-3.25.12-6.16.03-8.12 6.86 1.05 10.56 2.17 14.06 3.62 5.52 2.28 8.59 5.44 7.97 8.96l-.01-.02Zm-22 16.15c-.12 0-.23-.02-.34-.03l.34-.03v.06Zm-.69-.7c0-3.13.26-8.84.47-14.51.06 1.2.11 2.41.15 3.6.15 3.6.25 7.23.09 10.83-.24.03-.48.05-.71.07v.01Zm-12.33-30.94c.37.63 2.01 1.01 3.23 1.25v.15c-1.31-.31-2.59-.73-3.83-1.29.12-.36.23-.72.33-1.09.08.48.18.84.27.98Zm13.7 31.65v-.18c3.41-.56 6.71-2.02 9.69-3.68 2.31-1.28 4.59-2.78 6.63-4.53-4.69 4.53-11.61 8.24-16.33 8.38l.01.01Zm24.07-.75c-2.05 1.93-4.37 3.56-6.83 4.95 2.7-1.78 5.52-4.03 8.42-6.87.82-.82 1.56-1.69 2.23-2.59-1.08 1.65-2.38 3.16-3.81 4.51h-.01ZM187.16 92.14c-.79-2.47-2.1-7.12-3.1-6.87-.19-.01-2.09.77-4.08 1.54-3.06 1.18-5.91 2.13-10.09 2.82-2.74.42-5.87 1.01-10.61 1.06.04-3.34.05-6.01.05-7.99 7.97-.65 12.33-2.11 16.37-3.55 1.11-.39 2.69-1.01 2.63-1.8-.08-.35-.55-1.39-1.17-2.61-.47-1.16-.98-2.31-1.61-3.38-.42-.71-1.04-1.69-1.86-2.06-.11-.08-.22-.13-.29-.12-.02 0-.04 0-.07.01-.19-.04-.39-.05-.6-.01-.17.03-.24.15-.25.28-.04.02-.09.04-.14.05-4.33 1.48-8.85 2.33-13.24 3.61a499.1 499.1 0 0 0-.31-8.19c4.51-.99 8.88-1.38 13.11-1.82 3.68-.38 6.28.12 7.47.34.59.11.9.16 1.16.18h.1c-.1.37.44.66.62.28.02-.04.03-.08.05-.13.15.2.53.22.62-.1.17-.58.19-1.21.21-1.81v-.36c.03-.15.05-.3.07-.45.52-2.47.33-5.09-.64-7.44-.11-.27-.44-.28-.6-.14-.08-.21-.15-.42-.24-.62-.19-.41-.79-.05-.6.35.03.07.05.15.09.22-.98-.42-2.15-.54-3.17-.63-2.17-.19-4.37-.14-6.54 0-5.7.35-11.4 1.3-16.91 2.79-2.08.56-4.13 1.22-6.14 2-4.54 1.05-3.79 1.51-2.17 6.07.18.51.46 1.68.54 1.94.82 2.47 1.08 2.13 3.1 2.13s0 .05 0 .08h.52c-.48 2.66-.51 5.45-.62 8.13-.15 3.48-.22 6.96-.28 10.45 0 .41-.01.82-.02 1.23-.16.29-.33.57-.51.85-.05.38-.09.77-.14 1.18-.42 3.52-.59 6.48-.52 8.8v.34c.02.47.05.76.06.87.16 1.57-.26 3.47 1.35 3.79 1.61.32 3.5.55 4.85.55.11 0 .22-.02.33-.02 1.79.24 3.67.05 5.45-.12 2.85-.28 5.69-.7 8.51-1.19 3.03-.53 6.05-1.14 9.04-1.86 2.4-.58 4.82-1.19 7.13-2.06.51-.19 1.73-.57 2.46-1.14 1.81-.68 2.18-1 1.57-2.67-.23-.62-.48-1.49-.91-2.78l-.03-.02Zm-11.12-38.71c.89.05 1.93.08 2.89.3-.33 0-.68-.02-1.06-.03-8.28-.26-14.88.75-23.97 2.51 2.41-.64 4.85-1.16 7.28-1.59 4.87-.86 9.91-1.45 14.86-1.19Zm-26.53 22.13c.03 1.71.04 3.43 0 5.14-.04 1.27-.11 2.55-.24 3.82 0-.73.02-1.46.04-2.19.05-2.26.12-4.51.22-6.77h-.02Zm6.73 27.85c.2-.1.4-.21.58-.33 1.82-.17 3.82-.24 5.94-.34-.86.11-1.72.24-2.58.33-1.27.14-2.61.31-3.93.34h-.01ZM534.48 85.44c-3.52-8.38-7.07-16.75-10.5-25.17-.63-1.54-1.25-3.09-1.86-4.65-.31-.8-.65-1.6-.87-2.43-.04-.17-.17-.24-.31-.25.1-.2 0-.51-.29-.53-1.59-.08-3.18-.22-4.78-.25-1.96-.03-3.91.13-5.84.42-.31.05-.31.38-.13.56-.03.06-.05.14-.04.22.23 1.54.63 3.06 1.16 4.53.13.35.27.7.41 1.06l-2.68 6.18c-.11.03-.2.09-.25.22-.67 1.9-1.52 3.73-2.34 5.56a536.85 536.85 0 0 1-3.9 8.45c-2.64 5.64-5.34 11.25-7.91 16.93-.44.97-.88 1.94-1.29 2.93-.2.48-.47 1-.55 1.52v.05c-.02.12.02.26.16.34 1.19.73 2.41 1.41 3.66 2.05 1.2.62 2.45 1.25 3.76 1.61.43.12.62-.55.19-.67-1.13-.31-2.2-.83-3.24-1.36 1.09.36 2.1.69 2.75.93 2.82 1.01 2.38 1.1 4.3-3.75 2.1-1.09 4.34-1.96 6.53-2.79 4.35-1.64 8.8-3.03 13.27-4.29.82 2.01 1.77 3.97 2.72 5.92.35.83.62 1.45.79 1.82.22.42.45.8.69 1.15.17.33.33.67.5 1 .42.8.84 1.63 1.4 2.35.23.29.6 0 .55-.31 1.53-.02 3.06-.07 4.58-.27.92-.12 1.82-.32 2.71-.54 1.39-.27 3.85-1.11 3.74-1.42-.67-1.96-1.55-3.87-2.34-5.78-1.57-3.78-3.16-7.56-4.75-11.33v-.01Zm-11.65-26.16c1.54 3.81 3.12 7.6 4.7 11.4 2.94 7.05 5.91 14.09 8.87 21.13l-1.06-2.17c-2.71-5.51-5.2-11.19-7.41-16.87l-6.65-17.15c-.65-1.45-.55-2.19-.93-2.53.09 0 .18.01.28.02a.29.29 0 0 0-.04.26c.52 2.02 1.47 3.98 2.25 5.91h-.01Zm-6.58 13.58c.05-.15.09-.31.14-.46 1.41 3.92 2.88 7.9 4.39 11.87-3.22.52-6.38 1.25-9.46 2.14.55-1.22 1.05-2.46 1.53-3.7 1.24-3.24 2.37-6.53 3.39-9.85h.01Zm-.23-20c.36 0 .73.03 1.09.05-2.15.1-5.18.33-5.87.74-.24.15-.41.3-.53.45-.06-.29-.13-.58-.18-.88 1.82-.26 3.65-.39 5.49-.35v-.01Zm-.09 18.72c-.49 1.67-1.05 3.33-1.6 4.97-1.07 3.19-2.19 6.38-3.57 9.46-.09.21-.19.43-.29.65-.25.07-.5.14-.74.22 2.53-6.16 4.61-11.29 6.2-15.3Zm-6.34 25.16c4.97-2.38 9.37-4.1 14.02-5.27l.26.64c-4.8 1.35-9.63 2.8-14.28 4.63Zm20.17 6.76c.33.23.68.42 1.04.56h-.33c-.12 0-.21.06-.26.13-.15-.23-.31-.45-.45-.7v.01ZM226.57 91.75c-3.55-4.74-6.68-9.11-9.31-12.99 9.2-15.25 10.05-17.81 10.35-18.38.17-.34 1.09-2.27.64-2.53-1.13-.65-1.03-.65-2.97-1.71-1.19-.65-3.04-1.61-4.53-2.12-1.71-.59-1.24-.36-3 2.77-.06.1-.11.2-.17.3-.75 1.02-1.48 2.05-2.2 3.09-1.88 2.71-3.73 5.45-5.69 8.1-3.68-4.91-6.88-8.76-9.51-11.43-.15-.15-.3-.29-.46-.42-1.27-1.28-7.24 3.53-7.93 5.58-.09.09-.19.16-.28.25-.27.26.03.64.33.58.19.65.5 1.29.94 1.91 3.85 5.06 7.19 9.76 9.94 14-1.23 2.61-3.06 5-4.67 7.38l-2.28 3.33c-.5.66-.93 1.23-1.29 1.69-.67.93-2.09 2.61-2.3 3.87-.51.85-1.16 1.84-1.29 2.83-.06.44.61.63.67.19.01-.08.04-.15.06-.22 1.36 1.08 2.76 2.11 4.19 3.11 1.3.91 2.62 1.85 4.04 2.56.21.1.4 0 .48-.17.24.07.48.14.72.2.44.1.62-.57.19-.67-2.02-.48-3.77-1.57-5.23-3.02-.47-.46-.9-.96-1.32-1.46 1.74 1.35 4.2 2.89 5.89 4.14 1.39 1.03 2.85-2.27 4.22-4.2 1.86-2.64 3.96-5.86 5.52-8.29l10.39 14.51c.67.81 1.14 1.21 1.57 1.36-.05.24.12.51.41.4 1.53-.58 3.05-1.19 4.54-1.87 1.52-.69 3.06-1.45 4.36-2.5a.28.28 0 0 0 .12-.23c1.66-1.1.81-1.74-1.41-4.91-1.13-1.58-1.71-2.36-3.7-5.01l-.03-.02Zm2.41 6.54c.56 1.15 1.19 2.52 1.11 3.81-.06.04-.12.07-.17.1-.03-.88-.55-2.66-.94-3.91Zm-16.51-32.73c1.86-2.65 3.65-5.35 5.57-7.95.4-.55.81-1.13 1.26-1.66.19-.18.38-.33.56-.45.18.03.36.08.55.13l-8.05 10.11.12-.18h-.01ZM192.7 95.48c.79-1.37 1.66-2.69 2.54-4 1.19-1.79 2.4-3.56 3.61-5.33-.04.09-.09.17-.13.26-.1.22.03.41.2.49-2.47 3.42-4.89 6.73-6.4 9.28.21.24.4.48.63.75-.24.07-.4.36-.17.56.4.33.72.77 1.05 1.17.09.11.18.21.27.32-.84-.61-1.66-1.24-2.47-1.88.24-.57.58-1.11.87-1.61v-.01Zm7.46-10.32c.47-.81.98-1.59 1.49-2.37.31-.48.64-.95.96-1.43.26-.29.52-.56.75-.79-.99 1.48-2.09 3.03-3.2 4.59Zm10.03-16.22s-.03-.05-.05-.07c.22-.29.43-.59.64-.89-.2.32-.4.65-.58.96h-.01ZM371.54 87.96c-.01-.08-.01-.16-.03-.23-.06-.38-.58-.29-.66.03-.3-.05-.6-.08-.81-.11-1.14-.15-2.29-.19-3.44-.2 1.04-.09 2.09-.18 3.14-.23.45-.02.45-.72 0-.7-6.57.35-13.14 1.23-19.65 2.11-1.53.21-3.05.42-4.57.68-.01 0-.02.01-.04.01-.04-3.33-.13-6.66-.24-9.99-.19-5.7-.4-11.41-.88-17.1-.13-1.51-.23-3.07-.49-4.58 0-.25 0-.48-.02-.68-.06-1.19-.04-2.61-.68-2.78-.16-.07-.72-.16-1.5-.24.22-.17.16-.62-.2-.63-1.19-.04-2.39.09-3.57.23-1.2.14-2.41.32-3.59.6-.16-.1-.41-.06-.5.12-.06.02-.13.03-.19.05-.35.1-.29.55-.03.66-.26.6-.19 2.27-.21 3-.02.66-.66 33.73-.9 40.3-.03.65.06 1.12.04 1.45-.16 3.05.87 4.96 6.34 3.93 1.09-.08 2.75-.77 5.36-1.43 4.13-1.04 5.78-1.52 6.2-1.65 6.43-1.69 6.78-1.97 11.72-2.43.55-.05 4.8-.38 6.03-.3.64.04 1.19.07 1.65.1.09 0 .16-.03.24-.05.1.27.56.33.66-.02.39-1.32.61-2.71.78-4.08.2-1.61.29-3.24.15-4.86.24.03.52-.23.38-.53-.09-.2-.27-.33-.49-.43v-.02Zm-.63.56c.07.57.11 1.14.11 1.71-.21-.99-.53-1.71-.95-1.87.22.03.44.06.65.11.06.01.12.04.19.05Zm-25.41 1.73c1.54-.36 3.1-.64 4.66-.89-1.61.37-3.18.77-4.66 1.2v-.31Zm-.86-7.37c-.07-1.37-.16-2.75-.25-4.12-.21-3.13-.45-6.27-.79-9.4.02-2.25.08-4.31.13-6.11.16 2.08.29 4.16.4 6.24.23 4.46.38 8.93.5 13.39h.01Zm-.94-4c.16 2.41.29 4.83.39 7.24.06 1.6.14 3.22.09 4.83-.15.05-.32.09-.47.14V78.88h-.01ZM483.72 92.83c-3.05-2.28-6.22-4.4-9.38-6.51 8.86-6.49 13.49-12.95 13.73-19.23.04-.76 0-1.5-.13-2.2-.67-3.82-3.5-6.68-8.39-8.48.13.04.27.08.4.13 3.92 1.39 7.74 4.23 8.5 8.56.34 1.95-.05 3.96-.98 5.69-.21.4.39.75.6.35 1.86-3.46 1.46-7.55-.97-10.63-3.53-4.47-9.76-5.88-15.16-6.16-2.32-.12-4.64-.04-6.95.19-6 .32-12.71 1.68-17.63 3.21-.37.11-.67.23-.92.35-.2-.17-.62.02-.57.37v.03c-.64.68-.18 1.64.48 3.21.38.91.67 1.89 1.15 2.58.32.76.68 1.51 1.13 2.19.14.21.38.19.53.07.19-.02.38-.05.57-.08v1.57c-.06.06-.1.13-.11.23-.27 4.18-.34 8.38-.48 12.57l-.3 9.03c-.24 3.91-.44 6.77-.46 7.26-.05.88-.11 1.95.07 2.81-.01.22-.02.43-.04.65 0 .11-.02.23-.03.35 0 .05-.03.27-.01.16-.05.4.5.59.64.28.05.04.12.08.2.08 1.75.13 3.5.28 5.25.3 1.69.02 3.38-.12 5.06-.32.08.23.36.39.55.15.06-.08.11-.17.16-.26.18-.09.24-.32.18-.48.05-.2.1-.4.13-.6.16-.86.25-1.74.33-2.62.11-1.17.17-2.34.23-3.51.15-.01.32-.03.52-.04.36-.03 1.73-.15 2.06-.15.39 0 .7-.02.95-.04 1.76 1.11 3.45 2.35 5.14 3.55 2.83 2.01 5.64 4.04 8.47 6.04 1.42 1 2.85 2 4.29 2.97.1.06.19.07.27.04.08 0 .17-.02.25-.1 1.61-1.56 3.15-3.18 4.6-4.88.75-.88 1.49-1.78 2.15-2.73.01.01.03.02.04.03.34.3.83-.2.49-.49-2.16-1.9-4.34-3.76-6.64-5.48l.03-.01Zm-6.38-3.65a55.72 55.72 0 0 0-4-2.13c.14-.1.26-.19.4-.29 1.2.81 2.4 1.61 3.6 2.42Zm-20.1 11.78c.67-.37 1.23-.91 1.67-1.6-.11.5-.24 1-.38 1.49-.43.04-.86.08-1.29.11Zm2.38-37.24c1.34-.31 2.56-.52 3.71-.69-1.03.19-2.04.41-3.04.65-.14-.07-.34-.02-.45.11-.07.02-.15.04-.22.05v-.13.01Zm.04.84c.07-.02.14-.03.2-.05.34 1.66.41 3.41.5 5.09.17 2.9.24 5.81.28 8.71l.03 3.17c-.17.07-.34.14-.51.2-.06-4.96-.21-10.58-.51-17.12h.01Zm16.04 5.62c-1.16 2.25-3.06 4.1-5.02 5.66-2.8 2.23-5.99 3.97-9.3 5.35-.01-3.56-.09-7.12-.27-10.67-.1-2.04-.16-4.16-.57-6.18 3.3-.78 6.72-1.36 10.1-1.1 1.85.14 4.23.59 5.32 2.29.92 1.43.46 3.24-.26 4.65Zm.85-.18c.6-1.37.9-2.92.28-4.32-.67-1.52-2.2-2.32-3.76-2.74.46.1.89.21 1.29.37 1.74.67 2.69 1.88 2.93 3.21.2 1.13-.05 2.25-.74 3.47V70Zm-27.47-4.14c-.12-.19-.23-.38-.34-.57.74.42.85.36.99.41v.08c-.22.03-.43.06-.65.08Zm11.21 30.46c-.08 1.08-.16 2.17-.33 3.24-.05.35-.11.69-.2 1.03 0 .04-.02.07-.03.11-.15.02-.3.04-.45.05.45-1.64.76-3.36.79-5.07.03-.29.08-.57.1-.89-.03-.31-.03-.47.24-.57-.04.69-.07 1.39-.12 2.08v.02Zm5.6-2.47c.48.11.92.52 2.49 1.72-.46-.32-.92-.65-1.38-.97-.37-.25-.73-.5-1.1-.75h-.01Zm21.23 7.24a70.76 70.76 0 0 1-4.37 4.63c-.14-.09-.27-.19-.4-.28.19-.09.37-.24.55-.47.87-1.14 5.43-5.51 5.49-7.45.31.26.62.53.92.79-.67.97-1.42 1.88-2.19 2.77v.01Z",
@@ -42255,24 +42827,24 @@ var ExcalidrawLogo = ({
   size = "small",
   withText
 }) => {
-  return /* @__PURE__ */ jsxs83("div", { className: `ExcalidrawLogo is-${size}`, style, children: [
-    /* @__PURE__ */ jsx155(LogoIcon, {}),
-    withText && /* @__PURE__ */ jsx155(LogoText, {})
+  return /* @__PURE__ */ jsxs84("div", { className: `ExcalidrawLogo is-${size}`, style, children: [
+    /* @__PURE__ */ jsx156(LogoIcon, {}),
+    withText && /* @__PURE__ */ jsx156(LogoText, {})
   ] });
 };
 
 // components/welcome-screen/WelcomeScreen.Center.tsx
-import { Fragment as Fragment26, jsx as jsx156, jsxs as jsxs84 } from "react/jsx-runtime";
+import { Fragment as Fragment27, jsx as jsx157, jsxs as jsxs85 } from "react/jsx-runtime";
 var WelcomeScreenMenuItemContent = ({
   icon,
   shortcut,
   children
 }) => {
   const editorInterface = useEditorInterface();
-  return /* @__PURE__ */ jsxs84(Fragment26, { children: [
-    /* @__PURE__ */ jsx156("div", { className: "welcome-screen-menu-item__icon", children: icon }),
-    /* @__PURE__ */ jsx156("div", { className: "welcome-screen-menu-item__text", children }),
-    shortcut && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx156("div", { className: "welcome-screen-menu-item__shortcut", children: shortcut })
+  return /* @__PURE__ */ jsxs85(Fragment27, { children: [
+    /* @__PURE__ */ jsx157("div", { className: "welcome-screen-menu-item__icon", children: icon }),
+    /* @__PURE__ */ jsx157("div", { className: "welcome-screen-menu-item__text", children }),
+    shortcut && editorInterface.formFactor !== "phone" && /* @__PURE__ */ jsx157("div", { className: "welcome-screen-menu-item__shortcut", children: shortcut })
   ] });
 };
 WelcomeScreenMenuItemContent.displayName = "WelcomeScreenMenuItemContent";
@@ -42284,14 +42856,14 @@ var WelcomeScreenMenuItem = ({
   className = "",
   ...props
 }) => {
-  return /* @__PURE__ */ jsx156(
+  return /* @__PURE__ */ jsx157(
     "button",
     {
       ...props,
       type: "button",
       className: `welcome-screen-menu-item ${className}`,
       onClick: onSelect,
-      children: /* @__PURE__ */ jsx156(WelcomeScreenMenuItemContent, { icon, shortcut, children })
+      children: /* @__PURE__ */ jsx157(WelcomeScreenMenuItemContent, { icon, shortcut, children })
     }
   );
 };
@@ -42304,7 +42876,7 @@ var WelcomeScreenMenuItemLink = ({
   className = "",
   ...props
 }) => {
-  return /* @__PURE__ */ jsx156(
+  return /* @__PURE__ */ jsx157(
     "a",
     {
       ...props,
@@ -42312,38 +42884,38 @@ var WelcomeScreenMenuItemLink = ({
       href,
       target: "_blank",
       rel: "noopener",
-      children: /* @__PURE__ */ jsx156(WelcomeScreenMenuItemContent, { icon, shortcut, children })
+      children: /* @__PURE__ */ jsx157(WelcomeScreenMenuItemContent, { icon, shortcut, children })
     }
   );
 };
 WelcomeScreenMenuItemLink.displayName = "WelcomeScreenMenuItemLink";
 var Center = ({ children }) => {
   const { WelcomeScreenCenterTunnel } = useTunnels();
-  return /* @__PURE__ */ jsx156(WelcomeScreenCenterTunnel.In, { children: /* @__PURE__ */ jsx156("div", { className: "welcome-screen-center", children: children || /* @__PURE__ */ jsxs84(Fragment26, { children: [
-    /* @__PURE__ */ jsx156(Logo, {}),
-    /* @__PURE__ */ jsx156(Heading, { children: t("welcomeScreen.defaults.center_heading") }),
-    /* @__PURE__ */ jsxs84(Menu, { children: [
-      /* @__PURE__ */ jsx156(MenuItemLoadScene, {}),
-      /* @__PURE__ */ jsx156(MenuItemHelp, {})
+  return /* @__PURE__ */ jsx157(WelcomeScreenCenterTunnel.In, { children: /* @__PURE__ */ jsx157("div", { className: "welcome-screen-center", children: children || /* @__PURE__ */ jsxs85(Fragment27, { children: [
+    /* @__PURE__ */ jsx157(Logo, {}),
+    /* @__PURE__ */ jsx157(Heading, { children: t("welcomeScreen.defaults.center_heading") }),
+    /* @__PURE__ */ jsxs85(Menu, { children: [
+      /* @__PURE__ */ jsx157(MenuItemLoadScene, {}),
+      /* @__PURE__ */ jsx157(MenuItemHelp, {})
     ] })
   ] }) }) });
 };
 Center.displayName = "Center";
 var Logo = ({ children }) => {
-  return /* @__PURE__ */ jsx156("div", { className: "welcome-screen-center__logo excalifont welcome-screen-decor", children: children || /* @__PURE__ */ jsx156(ExcalidrawLogo, { withText: true }) });
+  return /* @__PURE__ */ jsx157("div", { className: "welcome-screen-center__logo excalifont welcome-screen-decor", children: children || /* @__PURE__ */ jsx157(ExcalidrawLogo, { withText: true }) });
 };
 Logo.displayName = "Logo";
 var Heading = ({ children }) => {
-  return /* @__PURE__ */ jsx156("div", { className: "welcome-screen-center__heading welcome-screen-decor excalifont", children });
+  return /* @__PURE__ */ jsx157("div", { className: "welcome-screen-center__heading welcome-screen-decor excalifont", children });
 };
 Heading.displayName = "Heading";
 var Menu = ({ children }) => {
-  return /* @__PURE__ */ jsx156("div", { className: "welcome-screen-menu", children });
+  return /* @__PURE__ */ jsx157("div", { className: "welcome-screen-menu", children });
 };
 Menu.displayName = "Menu";
 var MenuItemHelp = () => {
   const actionManager = useExcalidrawActionManager();
-  return /* @__PURE__ */ jsx156(
+  return /* @__PURE__ */ jsx157(
     WelcomeScreenMenuItem,
     {
       onSelect: () => actionManager.executeAction(actionShortcuts),
@@ -42360,7 +42932,7 @@ var MenuItemLoadScene = () => {
   if (appState.viewModeEnabled) {
     return null;
   }
-  return /* @__PURE__ */ jsx156(
+  return /* @__PURE__ */ jsx157(
     WelcomeScreenMenuItem,
     {
       onSelect: () => actionManager.executeAction(actionLoadScene),
@@ -42375,7 +42947,7 @@ var MenuItemLiveCollaborationTrigger = ({
   onSelect
 }) => {
   const { t: t2 } = useI18n();
-  return /* @__PURE__ */ jsx156(WelcomeScreenMenuItem, { shortcut: null, onSelect, icon: usersIcon, children: t2("labels.liveCollaboration") });
+  return /* @__PURE__ */ jsx157(WelcomeScreenMenuItem, { shortcut: null, onSelect, icon: usersIcon, children: t2("labels.liveCollaboration") });
 };
 MenuItemLiveCollaborationTrigger.displayName = "MenuItemLiveCollaborationTrigger";
 Center.Logo = Logo;
@@ -42388,40 +42960,40 @@ Center.MenuItemLoadScene = MenuItemLoadScene;
 Center.MenuItemLiveCollaborationTrigger = MenuItemLiveCollaborationTrigger;
 
 // components/welcome-screen/WelcomeScreen.Hints.tsx
-import { jsx as jsx157, jsxs as jsxs85 } from "react/jsx-runtime";
+import { jsx as jsx158, jsxs as jsxs86 } from "react/jsx-runtime";
 var MenuHint = ({ children }) => {
   const { WelcomeScreenMenuHintTunnel } = useTunnels();
-  return /* @__PURE__ */ jsx157(WelcomeScreenMenuHintTunnel.In, { children: /* @__PURE__ */ jsxs85("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--menu", children: [
+  return /* @__PURE__ */ jsx158(WelcomeScreenMenuHintTunnel.In, { children: /* @__PURE__ */ jsxs86("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--menu", children: [
     WelcomeScreenMenuArrow,
-    /* @__PURE__ */ jsx157("div", { className: "welcome-screen-decor-hint__label", children: children || t("welcomeScreen.defaults.menuHint") })
+    /* @__PURE__ */ jsx158("div", { className: "welcome-screen-decor-hint__label", children: children || t("welcomeScreen.defaults.menuHint") })
   ] }) });
 };
 MenuHint.displayName = "MenuHint";
 var ToolbarHint = ({ children }) => {
   const { WelcomeScreenToolbarHintTunnel } = useTunnels();
-  return /* @__PURE__ */ jsx157(WelcomeScreenToolbarHintTunnel.In, { children: /* @__PURE__ */ jsxs85("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--toolbar", children: [
-    /* @__PURE__ */ jsx157("div", { className: "welcome-screen-decor-hint__label", children: children || t("welcomeScreen.defaults.toolbarHint") }),
+  return /* @__PURE__ */ jsx158(WelcomeScreenToolbarHintTunnel.In, { children: /* @__PURE__ */ jsxs86("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--toolbar", children: [
+    /* @__PURE__ */ jsx158("div", { className: "welcome-screen-decor-hint__label", children: children || t("welcomeScreen.defaults.toolbarHint") }),
     WelcomeScreenTopToolbarArrow
   ] }) });
 };
 ToolbarHint.displayName = "ToolbarHint";
 var HelpHint = ({ children }) => {
   const { WelcomeScreenHelpHintTunnel } = useTunnels();
-  return /* @__PURE__ */ jsx157(WelcomeScreenHelpHintTunnel.In, { children: /* @__PURE__ */ jsxs85("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--help", children: [
-    /* @__PURE__ */ jsx157("div", { children: children || t("welcomeScreen.defaults.helpHint") }),
+  return /* @__PURE__ */ jsx158(WelcomeScreenHelpHintTunnel.In, { children: /* @__PURE__ */ jsxs86("div", { className: "excalifont welcome-screen-decor welcome-screen-decor-hint welcome-screen-decor-hint--help", children: [
+    /* @__PURE__ */ jsx158("div", { children: children || t("welcomeScreen.defaults.helpHint") }),
     WelcomeScreenHelpArrow
   ] }) });
 };
 HelpHint.displayName = "HelpHint";
 
 // components/welcome-screen/WelcomeScreen.tsx
-import { Fragment as Fragment27, jsx as jsx158, jsxs as jsxs86 } from "react/jsx-runtime";
+import { Fragment as Fragment28, jsx as jsx159, jsxs as jsxs87 } from "react/jsx-runtime";
 var WelcomeScreen = (props) => {
-  return /* @__PURE__ */ jsx158(Fragment27, { children: props.children || /* @__PURE__ */ jsxs86(Fragment27, { children: [
-    /* @__PURE__ */ jsx158(Center, {}),
-    /* @__PURE__ */ jsx158(MenuHint, {}),
-    /* @__PURE__ */ jsx158(ToolbarHint, {}),
-    /* @__PURE__ */ jsx158(HelpHint, {})
+  return /* @__PURE__ */ jsx159(Fragment28, { children: props.children || /* @__PURE__ */ jsxs87(Fragment28, { children: [
+    /* @__PURE__ */ jsx159(Center, {}),
+    /* @__PURE__ */ jsx159(MenuHint, {}),
+    /* @__PURE__ */ jsx159(ToolbarHint, {}),
+    /* @__PURE__ */ jsx159(HelpHint, {})
   ] }) });
 };
 WelcomeScreen.displayName = "WelcomeScreen";
@@ -42561,7 +43133,7 @@ import {
 import { CaptureUpdateAction as CaptureUpdateAction38 } from "@excalidraw/element";
 
 // components/TTDDialog/TTDDialogTrigger.tsx
-import { jsx as jsx159, jsxs as jsxs87 } from "react/jsx-runtime";
+import { jsx as jsx160, jsxs as jsxs88 } from "react/jsx-runtime";
 var TTDDialogTrigger = ({
   children,
   icon
@@ -42569,7 +43141,7 @@ var TTDDialogTrigger = ({
   const { t: t2 } = useI18n();
   const { TTDDialogTriggerTunnel } = useTunnels();
   const setAppState = useExcalidrawSetAppState();
-  return /* @__PURE__ */ jsx159(TTDDialogTriggerTunnel.In, { children: /* @__PURE__ */ jsxs87(
+  return /* @__PURE__ */ jsx160(TTDDialogTriggerTunnel.In, { children: /* @__PURE__ */ jsxs88(
     DropdownMenu_default.Item,
     {
       onSelect: () => {
@@ -42579,7 +43151,7 @@ var TTDDialogTrigger = ({
       icon: icon ?? brainIcon,
       children: [
         children ?? t2("labels.textToDiagram"),
-        /* @__PURE__ */ jsx159(DropdownMenu_default.Item.Badge, { children: "AI" })
+        /* @__PURE__ */ jsx160(DropdownMenu_default.Item.Badge, { children: "AI" })
       ]
     }
   ) });
@@ -42604,7 +43176,8 @@ var DiagramToCodePlugin = (props) => {
 // index.tsx
 import { isElementLink as isElementLink3 } from "@excalidraw/element";
 import { setCustomTextMetricsProvider } from "@excalidraw/element";
-import { jsx as jsx160 } from "react/jsx-runtime";
+import { dataURLToBlob as dataURLToBlob2, blobToDataURL as blobToDataURL2 } from "@excalidraw/common";
+import { jsx as jsx161 } from "react/jsx-runtime";
 polyfill_default();
 var ExcalidrawBase = (props) => {
   const {
@@ -42677,7 +43250,7 @@ var ExcalidrawBase = (props) => {
       document.removeEventListener("touchmove", handleTouchMove);
     };
   }, []);
-  return /* @__PURE__ */ jsx160(EditorJotaiProvider, { store: editorJotaiStore, children: /* @__PURE__ */ jsx160(InitializeApp, { langCode, theme, children: /* @__PURE__ */ jsx160(
+  return /* @__PURE__ */ jsx161(EditorJotaiProvider, { store: editorJotaiStore, children: /* @__PURE__ */ jsx161(InitializeApp, { langCode, theme, children: /* @__PURE__ */ jsx161(
     App_default,
     {
       onChange,
@@ -42753,7 +43326,7 @@ var areEqual5 = (prevProps, nextProps) => {
   });
   return isUIOptionsSame && isShallowEqual10(prev, next);
 };
-var Excalidraw = React47.memo(ExcalidrawBase, areEqual5);
+var Excalidraw = React48.memo(ExcalidrawBase, areEqual5);
 Excalidraw.displayName = "Excalidraw";
 export {
   Button,
@@ -42767,8 +43340,10 @@ export {
   FooterCenter_default as Footer,
   LiveCollaborationTrigger_default as LiveCollaborationTrigger,
   MIME_TYPES10 as MIME_TYPES,
+  MX_FILE_EXTENSIONS,
   MainMenu_default as MainMenu,
   ROUNDNESS3 as ROUNDNESS,
+  SUPPORTED_IMPORT_EXTENSIONS,
   Sidebar,
   Stats,
   THEME16 as THEME,
@@ -42776,15 +43351,19 @@ export {
   TTDDialogTrigger,
   UserIdleState2 as UserIdleState,
   WelcomeScreen_default as WelcomeScreen,
+  blobToDataURL2 as blobToDataURL,
   bumpVersion,
   convertToExcalidrawElements,
+  dataURLToBlob2 as dataURLToBlob,
   defaultLang,
   elementPartiallyOverlapsWithOrContainsBBox,
   elementsOverlappingBBox,
+  exportSceneWithAssets,
   exportToBlob,
   exportToCanvas2 as exportToCanvas,
   exportToClipboard,
   exportToSvg2 as exportToSvg,
+  exportToZip,
   getCommonBounds13 as getCommonBounds,
   getDataURL,
   getFormFactor2 as getFormFactor,
@@ -42796,18 +43375,23 @@ export {
   getVisibleSceneBounds2 as getVisibleSceneBounds,
   hashElementsVersion2 as hashElementsVersion,
   hashString2 as hashString,
+  importFromMxJson,
+  importFromZip,
+  importSceneWithAssets,
   isElementInsideBBox,
   isElementLink3 as isElementLink,
   isInvisiblySmallElement4 as isInvisiblySmallElement,
   isLinearElement13 as isLinearElement,
   languages,
   loadFromBlob,
+  loadFromMxFile,
   loadLibraryFromBlob,
   loadSceneOrLibraryFromBlob,
   mergeLibraryItems,
   mutateElement2 as mutateElement,
   newElementWith12 as newElementWith,
   normalizeLink4 as normalizeLink,
+  openMxFile,
   parseLibraryTokensFromUrl,
   reconcileElements,
   restore,
@@ -42815,6 +43399,7 @@ export {
   restoreElement,
   restoreElements,
   restoreLibraryItems,
+  saveToMxFile,
   sceneCoordsToViewportCoords2 as sceneCoordsToViewportCoords,
   serializeAsJSON,
   serializeLibraryAsJSON,
