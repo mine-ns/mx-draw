@@ -316,6 +316,7 @@ export {
   importFromZip,
   importFromMxJson,
   importSceneWithAssets,
+  type ExportOptions,
 } from "./data/exportAssets";
 
 export {

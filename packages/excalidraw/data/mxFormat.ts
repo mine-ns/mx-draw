@@ -7,6 +7,8 @@
  * Import supports: .mxwz, .mxwj, .excalidraw (legacy), .json (legacy)
  */
 
+import JSZip from "jszip";
+
 import { DEFAULT_FILENAME } from "@excalidraw/common";
 
 import type { ExcalidrawElement } from "@excalidraw/element/types";
@@ -37,6 +39,36 @@ export const SUPPORTED_IMPORT_EXTENSIONS = [
 ] as const;
 
 /**
+ * Extract asset hashes from an existing ZIP file
+ * Used to skip unchanged assets when overwriting a file
+ */
+const getExistingAssetHashes = async (
+  fileHandle: FileSystemHandle,
+): Promise<Set<string>> => {
+  try {
+    const file = await (fileHandle as any).getFile();
+    const zip = await JSZip.loadAsync(file);
+    const hashes = new Set<string>();
+
+    const assetsFolder = zip.folder("assets");
+    if (assetsFolder) {
+      assetsFolder.forEach((relativePath) => {
+        // Filename is {hash}.{ext}, extract hash
+        const hash = relativePath.split(".")[0];
+        if (hash) {
+          hashes.add(hash);
+        }
+      });
+    }
+
+    return hashes;
+  } catch {
+    // File doesn't exist or can't be read
+    return new Set();
+  }
+};
+
+/**
  * Save scene to MX format file (.mxwz)
  *
  * Always saves as ZIP archive for consistency.
@@ -55,10 +87,19 @@ export const saveToMxFile = async (
   name: string = DEFAULT_FILENAME,
   fileHandle?: FileSystemHandle | null,
 ): Promise<{ fileHandle: FileSystemHandle | null }> => {
+  // If overwriting an existing file, get existing asset hashes
+  // to skip unchanged assets (optimization for large media files)
+  let existingAssetHashes: Set<string> | undefined;
+  if (fileHandle) {
+    existingAssetHashes = await getExistingAssetHashes(fileHandle);
+  }
+
   // Always save as .mxwz (ZIP) for local files
   // This avoids confusing format switches when adding/removing media
   // The ZIP will just be smaller if there's no media
-  const zipBlob = await exportToZip(elements, appState, files);
+  const zipBlob = await exportToZip(elements, appState, files, {
+    existingAssetHashes,
+  });
   const handle = await fileSave(zipBlob, {
     name,
     extension: "mxwz" as any, // Cast needed as mxwz not in original MIME_TYPES

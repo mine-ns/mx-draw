@@ -55,6 +55,15 @@ const generateSceneHash = async (
   return fullHash.slice(0, 8);
 };
 
+export interface ExportOptions {
+  /**
+   * Set of asset hashes that already exist on the remote storage.
+   * Assets with matching hashes will be skipped (not included in the assets array)
+   * but their references will still be included in the scene.
+   */
+  existingAssetHashes?: Set<string>;
+}
+
 /**
  * Core export - separates scene from assets
  * Used by both local file save and cloud upload
@@ -62,12 +71,14 @@ const generateSceneHash = async (
  * @param elements - Scene elements
  * @param appState - Application state
  * @param files - Binary files (images/videos) with base64 dataURLs
+ * @param options - Export options (e.g., existingAssetHashes for deduplication)
  * @returns Scene JSON, asset blobs, and scene filename ready for storage
  */
 export const exportSceneWithAssets = async (
   elements: readonly ExcalidrawElement[],
   appState: Partial<AppState>,
   files: BinaryFiles,
+  options?: ExportOptions,
 ): Promise<SceneExportResult> => {
   const assets: ExportedAsset[] = [];
   const assetReferences: AssetReference[] = [];
@@ -89,8 +100,13 @@ export const exportSceneWithAssets = async (
       filename: `${hash}.${ext}`,
     };
 
+    // Always add reference (scene needs it for rendering)
     assetReferences.push(reference);
-    assets.push({ reference, blob });
+
+    // Only add blob if not already on remote storage
+    if (!options?.existingAssetHashes?.has(hash)) {
+      assets.push({ reference, blob });
+    }
   }
 
   const scene: ExportedSceneWithAssets = {
@@ -119,17 +135,20 @@ export const exportSceneWithAssets = async (
  * @param elements - Scene elements
  * @param appState - Application state
  * @param files - Binary files (images/videos)
+ * @param options - Export options (e.g., existingAssetHashes for deduplication)
  * @returns ZIP blob ready for download/storage
  */
 export const exportToZip = async (
   elements: readonly ExcalidrawElement[],
   appState: Partial<AppState>,
   files: BinaryFiles,
+  options?: ExportOptions,
 ): Promise<Blob> => {
   const { scene, assets, sceneFilename } = await exportSceneWithAssets(
     elements,
     appState,
     files,
+    options,
   );
 
   const zip = new JSZip();
