@@ -473,6 +473,10 @@ export const restoreElement = (
       return restoreElementWithProperties(element, {
         name: element.name ?? null,
       });
+    case "customContent":
+      return restoreElementWithProperties(element, {
+        contentType: (element as any).contentType ?? "unknown",
+      });
 
     // Don't use default case so as to catch a missing an element type case.
     // We also don't want to throw, but instead return void so we filter
