@@ -134,9 +134,9 @@ export const getEmbedLink = (
 
   const originalLink = link;
 
-  const allowSameOrigin = ALLOW_SAME_ORIGIN.has(
-    matchHostname(link, ALLOW_SAME_ORIGIN) || "",
-  );
+  // MX-WHITEBOARD: Allow same-origin for all URLs (enables localStorage, cookies, etc.)
+  // Original: const allowSameOrigin = ALLOW_SAME_ORIGIN.has(matchHostname(link, ALLOW_SAME_ORIGIN) || "");
+  const allowSameOrigin = true;
 
   let type: "video" | "generic" = "generic";
   let aspectRatio = { w: 560, h: 840 };
