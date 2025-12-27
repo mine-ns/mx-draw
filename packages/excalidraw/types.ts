@@ -467,6 +467,11 @@ export interface AppState {
   // and also remove groupId from this map
   lockedMultiSelections: { [groupId: string]: true };
   bindMode: BindMode;
+  /**
+   * Custom data that can be stored with the scene
+   * Used by integrations to store metadata (e.g., YouTrack data in sprint presentations)
+   */
+  customData?: Record<string, unknown>;
 }
 
 export type SearchMatch = {
